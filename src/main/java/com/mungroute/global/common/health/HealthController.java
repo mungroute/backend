@@ -1,4 +1,4 @@
-package com.mungroute.common.health;
+package com.mungroute.global.common.health;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
