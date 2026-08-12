@@ -15,6 +15,25 @@ spring:
     locations: classpath:db/migration
     validate-on-migrate: true
 
+security:
+  jwt:
+    # 운영 환경에서는 반드시 32바이트 이상의 무작위 JWT_SECRET을 주입한다.
+    secret: ${JWT_SECRET:local-development-secret-change-me-1234567890}
+    issuer: mungroute
+    access-token-ttl: 30m
+    refresh-token-ttl: 14d
+    cookie-secure: ${JWT_COOKIE_SECURE:false}
+  password-reset:
+    verification-ttl: 10m
+    reset-token-ttl: 10m
+    # 메일 연동 전 로컬 데모에서만 응답에 인증번호를 포함한다.
+    expose-code: ${PASSWORD_RESET_EXPOSE_CODE:false}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    persist-authorization: true
+
 server:
   port: 8080
 

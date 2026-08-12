@@ -4,7 +4,7 @@
 - 범위: `start → points → end`
 - 좌표 입력: WGS 84, EPSG:4326 (`lat`, `lon`)
 - DB 저장·거리 계산: EPSG:5186
-- 인증 적용 전 임시 정책: `start` 요청의 `userId` 사용
+- 인증: 모든 산책 API는 `Authorization: Bearer <access-token>`이 필요하며 토큰의 사용자 ID를 사용
 
 ## 공통 규칙
 
@@ -39,14 +39,12 @@ Content-Type: application/json
 
 ```json
 {
-  "userId": 1,
   "mode": "off"
 }
 ```
 
 | 필드 | 형식 | 필수 | 규칙 |
 | --- | --- | --- | --- |
-| `userId` | integer(int64) | 예 | 1 이상이며 `app_user`에 존재해야 함 |
 | `mode` | string | 예 | `off`, `distance`, `meet` 중 하나; 소문자 |
 
 ### 성공 응답
@@ -263,6 +261,5 @@ ENDED
 
 - JSON의 종료 거리 필드는 기술 명세서의 `lengthM` 대신 DB·도메인 명칭과
   일치하는 `distanceM`으로 통일한다.
-- `start`의 `userId`는 인증 도입 전 임시 계약이다. 인증 적용 후에는 토큰의
-  사용자 ID를 사용하고 요청 본문에서 제거한다.
+- `start`의 사용자 ID는 JWT의 `sub`에서 가져오며 요청 본문으로 받지 않는다.
 - D2에서는 저장 코스, 대표 코스, 맵매칭, 루프 판정을 구현하지 않는다.

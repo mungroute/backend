@@ -6,6 +6,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 
 import java.time.OffsetDateTime;
 
@@ -38,6 +40,33 @@ public class AppUser {
     private OffsetDateTime updatedAt;
 
     protected AppUser() {
+    }
+
+    private AppUser(String email, String nickname, String passwordHash, String phoneNumber) {
+        this.email = email;
+        this.nickname = nickname;
+        this.passwordHash = passwordHash;
+        this.phoneNumber = phoneNumber;
+    }
+
+    public static AppUser register(String email, String nickname, String passwordHash, String phoneNumber) {
+        return new AppUser(email, nickname, passwordHash, phoneNumber);
+    }
+
+    @PrePersist
+    void onCreate() {
+        OffsetDateTime now = OffsetDateTime.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = OffsetDateTime.now();
+    }
+
+    public void changePassword(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public Long getUserId() {

@@ -10,6 +10,14 @@ import org.springframework.data.repository.query.Param;
 import java.util.Optional;
 
 public interface AppUserRepository extends JpaRepository<AppUser, Long> {
+    Optional<AppUser> findByEmail(String email);
+
+    boolean existsByEmail(String email);
+
+    boolean existsByNickname(String nickname);
+
+    boolean existsByPhoneNumber(String phoneNumber);
+
     // 산책 시작을 직렬화하기 위해 사용자 행을 쓰기 잠금으로 조회
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
