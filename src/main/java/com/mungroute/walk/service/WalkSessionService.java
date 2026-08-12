@@ -32,16 +32,16 @@ public class WalkSessionService {
 
     // 사용자에게 새로운 활성 산책 세션 생성
     @Transactional
-    public StartWalkResponse startWalk(StartWalkRequest request) {
+    public StartWalkResponse startWalk(Long userId, StartWalkRequest request) {
         AppUser user = appUserRepository
-                .findByIdForUpdate(request.userId())
+                .findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(
                                 WalkErrorCode.USER_NOT_FOUND
                         )
                 );
 
-        validateNoActiveWalk(request.userId());
+        validateNoActiveWalk(userId);
 
         WalkMode mode = WalkMode.from(request.mode());
 
@@ -61,6 +61,7 @@ public class WalkSessionService {
     // 활성 산책 세션에 GPS 포인트 추가
     @Transactional
     public void addPoint(
+            Long userId,
             Long sessionId,
             AddWalkPointRequest request
     ) {
@@ -72,6 +73,8 @@ public class WalkSessionService {
                         new BusinessException(
                                 WalkErrorCode.WALK_SESSION_NOT_FOUND
                         ));
+
+        validateOwner(walkSession, userId);
 
         if (!walkSession.isActive()) {
             throw new BusinessException(
@@ -96,7 +99,7 @@ public class WalkSessionService {
 
     // 산책 결과를 계산해 종료, 이미 종료된 세션은 기존 결과를 반환
     @Transactional
-    public EndWalkResponse endWalk(Long sessionId) {
+    public EndWalkResponse endWalk(Long userId, Long sessionId) {
         WalkSession walkSession = walkSessionRepository
                 .findByIdForUpdate(sessionId)
                 .orElseThrow(() ->
@@ -104,6 +107,8 @@ public class WalkSessionService {
                                 WalkErrorCode.WALK_SESSION_NOT_FOUND
                         )
                 );
+
+        validateOwner(walkSession, userId);
 
         if (walkSession.isActive()) {
             OffsetDateTime endedAt = OffsetDateTime.now();
@@ -147,6 +152,12 @@ public class WalkSessionService {
             throw new BusinessException(
                     WalkErrorCode.INVALID_RECORDED_AT
             );
+        }
+    }
+
+    private void validateOwner(WalkSession walkSession, Long userId) {
+        if (!walkSession.getUser().getUserId().equals(userId)) {
+            throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
         }
     }
 }
