@@ -37,6 +37,13 @@ springdoc:
 server:
   port: 8080
 
+course:
+  routing:
+    candidate-count: 3
+    shade-alpha: 2.0
+    section-detour-ratio: 0.40
+    max-swapped-sections: 2
+
 management:
   endpoints:
     web:
