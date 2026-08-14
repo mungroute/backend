@@ -25,6 +25,12 @@ public class WalkSession {
     @Column(name = "ended_at")
     private OffsetDateTime endedAt;
 
+    @Column(name = "paused_at")
+    private OffsetDateTime pausedAt;
+
+    @Column(name = "paused_duration_sec", nullable = false)
+    private Integer pausedDurationSec = 0;
+
     @Column(name = "mode", nullable = false, length = 10)
     private WalkMode mode;
 
@@ -39,6 +45,31 @@ public class WalkSession {
             columnDefinition = "geometry(LineString, 5186)"
     )
     private LineString trackGeom;
+
+    @Column(name = "matched_segments")
+    private Long[] matchedSegments;
+
+    @Column(name = "is_loop")
+    private Boolean loop;
+
+    @Column(name = "is_saved", nullable = false)
+    private boolean saved;
+
+    @Column(name = "is_representative", nullable = false)
+    private boolean representative;
+
+    @Column(name = "course_name", length = 100)
+    private String courseName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "match_status", nullable = false, length = 24)
+    private WalkMatchStatus matchStatus = WalkMatchStatus.NOT_PERFORMED;
+
+    @Column(name = "match_failure_reason", length = 50)
+    private String matchFailureReason;
+
+    @Column(name = "matched_at")
+    private OffsetDateTime matchedAt;
 
     protected WalkSession() {
     }
@@ -65,6 +96,10 @@ public class WalkSession {
     // 아직 종료되지 않은 활성 산책인지 확인
     public boolean isActive() {
         return endedAt == null;
+    }
+
+    public boolean isPaused() {
+        return pausedAt != null;
     }
 
     public Long getSessionId() {
@@ -97,5 +132,45 @@ public class WalkSession {
 
     public LineString getTrackGeom() {
         return trackGeom;
+    }
+
+    public OffsetDateTime getPausedAt() {
+        return pausedAt;
+    }
+
+    public Integer getPausedDurationSec() {
+        return pausedDurationSec;
+    }
+
+    public Long[] getMatchedSegments() {
+        return matchedSegments;
+    }
+
+    public Boolean getLoop() {
+        return loop;
+    }
+
+    public boolean isSaved() {
+        return saved;
+    }
+
+    public boolean isRepresentative() {
+        return representative;
+    }
+
+    public String getCourseName() {
+        return courseName;
+    }
+
+    public WalkMatchStatus getMatchStatus() {
+        return matchStatus;
+    }
+
+    public String getMatchFailureReason() {
+        return matchFailureReason;
+    }
+
+    public OffsetDateTime getMatchedAt() {
+        return matchedAt;
     }
 }

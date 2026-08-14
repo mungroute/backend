@@ -1,6 +1,10 @@
 package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
+import tools.jackson.databind.ObjectMapper;
+import com.mungroute.course.matching.MapMatchingFailure;
+import com.mungroute.course.matching.MapMatchingResult;
+import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.walk.domain.WalkMode;
@@ -23,11 +27,27 @@ public class WalkSessionService {
     private final AppUserRepository appUserRepository;
     private final WalkSessionRepository walkSessionRepository;
     private final WalkTrackPointRepository walkTrackPointRepository;
+    private final WalkFinalizationService walkFinalizationService;
+    private final SimpleMapMatchingService mapMatchingService;
+    private final WalkMatchOutcomeService matchOutcomeService;
+    private final ObjectMapper objectMapper;
 
-    public WalkSessionService(AppUserRepository appUserRepository, WalkSessionRepository walkSessionRepository, WalkTrackPointRepository walkTrackPointRepository) {
+    public WalkSessionService(
+            AppUserRepository appUserRepository,
+            WalkSessionRepository walkSessionRepository,
+            WalkTrackPointRepository walkTrackPointRepository,
+            WalkFinalizationService walkFinalizationService,
+            SimpleMapMatchingService mapMatchingService,
+            WalkMatchOutcomeService matchOutcomeService,
+            ObjectMapper objectMapper
+    ) {
         this.appUserRepository = appUserRepository;
         this.walkSessionRepository = walkSessionRepository;
         this.walkTrackPointRepository = walkTrackPointRepository;
+        this.walkFinalizationService = walkFinalizationService;
+        this.mapMatchingService = mapMatchingService;
+        this.matchOutcomeService = matchOutcomeService;
+        this.objectMapper = objectMapper;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
@@ -82,6 +102,10 @@ public class WalkSessionService {
             );
         }
 
+        if (walkSession.isPaused()) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_PAUSED);
+        }
+
         validateRecordedAt(
                 walkSession,
                 request.recordedAt(),
@@ -98,24 +122,28 @@ public class WalkSessionService {
     }
 
     // 산책 결과를 계산해 종료, 이미 종료된 세션은 기존 결과를 반환
-    @Transactional
     public EndWalkResponse endWalk(Long userId, Long sessionId) {
-        WalkSession walkSession = walkSessionRepository
-                .findByIdForUpdate(sessionId)
-                .orElseThrow(() ->
-                        new BusinessException(
-                                WalkErrorCode.WALK_SESSION_NOT_FOUND
-                        )
+        WalkFinalizationService.FinalizationResult finalization = walkFinalizationService.finalizeWalk(
+                userId,
+                sessionId,
+                OffsetDateTime.now()
+        );
+        if (finalization.matchingRequired()) {
+            MapMatchingResult matchResult;
+            try {
+                matchResult = mapMatchingService.matchSession(sessionId);
+            } catch (RuntimeException exception) {
+                matchResult = new MapMatchingResult(
+                        com.mungroute.walk.domain.WalkMatchStatus.FAILED,
+                        java.util.List.of(),
+                        false,
+                        0,
+                        0,
+                        0,
+                        MapMatchingFailure.INTERNAL_ERROR
                 );
-
-        validateOwner(walkSession, userId);
-
-        if (walkSession.isActive()) {
-            OffsetDateTime endedAt = OffsetDateTime.now();
-            walkSessionRepository.finalizeWalkSession(
-                    walkSession.getSessionId(),
-                    endedAt
-            );
+            }
+            matchOutcomeService.save(sessionId, matchResult, OffsetDateTime.now());
         }
 
         EndWalkSummary summary = walkSessionRepository
@@ -126,7 +154,33 @@ public class WalkSessionService {
                         )
                 );
 
-        return EndWalkResponse.from(summary);
+        return EndWalkResponse.from(summary, objectMapper);
+    }
+
+    @Transactional
+    public com.mungroute.walk.dto.response.WalkStateResponse pauseWalk(Long userId, Long sessionId) {
+        OffsetDateTime changedAt = OffsetDateTime.now();
+        WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
+        validateOwner(session, userId);
+        if (!session.isActive()) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
+        }
+        walkSessionRepository.pauseWalkSession(sessionId, changedAt);
+        return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
+    }
+
+    @Transactional
+    public com.mungroute.walk.dto.response.WalkStateResponse resumeWalk(Long userId, Long sessionId) {
+        OffsetDateTime changedAt = OffsetDateTime.now();
+        WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
+        validateOwner(session, userId);
+        if (!session.isActive()) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
+        }
+        walkSessionRepository.resumeWalkSession(sessionId, changedAt);
+        return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "ACTIVE", changedAt);
     }
 
     // 사용자에게 이미 활성 산책이 있으면 시작을 거부함

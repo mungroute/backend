@@ -79,12 +79,28 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
                             THEN ROUND(stats.raw_distance_m::numeric, 1)
                             ELSE 0.0
                         END,
-                        duration_sec = FLOOR(
-                            EXTRACT(
-                                EPOCH FROM (:endedAt - session.started_at)
-                            )
-                        )::integer,
-                        track_geom = stats.track_geom
+                        duration_sec = GREATEST(
+                            0,
+                            FLOOR(EXTRACT(EPOCH FROM (:endedAt - session.started_at)))::integer
+                            - session.paused_duration_sec
+                            - CASE
+                                WHEN session.paused_at IS NULL THEN 0
+                                ELSE GREATEST(
+                                    0,
+                                    FLOOR(EXTRACT(EPOCH FROM (:endedAt - session.paused_at)))::integer
+                                )
+                              END
+                        ),
+                        track_geom = stats.track_geom,
+                        paused_duration_sec = session.paused_duration_sec
+                            + CASE
+                                WHEN session.paused_at IS NULL THEN 0
+                                ELSE GREATEST(
+                                    0,
+                                    FLOOR(EXTRACT(EPOCH FROM (:endedAt - session.paused_at)))::integer
+                                )
+                              END,
+                        paused_at = NULL
                     FROM stats
                     WHERE session.session_id = :sessionId
                       AND session.ended_at IS NULL
@@ -94,6 +110,81 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
     int finalizeWalkSession(
             @Param("sessionId") Long sessionId,
             @Param("endedAt") OffsetDateTime endedAt
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET paused_at = :pausedAt
+            WHERE session_id = :sessionId
+              AND ended_at IS NULL
+              AND paused_at IS NULL
+            """, nativeQuery = true)
+    int pauseWalkSession(
+            @Param("sessionId") Long sessionId,
+            @Param("pausedAt") OffsetDateTime pausedAt
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET paused_duration_sec = paused_duration_sec
+                    + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (:resumedAt - paused_at)))::integer),
+                paused_at = NULL
+            WHERE session_id = :sessionId
+              AND ended_at IS NULL
+              AND paused_at IS NOT NULL
+            """, nativeQuery = true)
+    int resumeWalkSession(
+            @Param("sessionId") Long sessionId,
+            @Param("resumedAt") OffsetDateTime resumedAt
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET match_status = :matchStatus,
+                match_failure_reason = :failureReason,
+                matched_at = :matchedAt
+            WHERE session_id = :sessionId
+            """, nativeQuery = true)
+    int updateMatchOutcome(
+            @Param("sessionId") Long sessionId,
+            @Param("matchStatus") String matchStatus,
+            @Param("failureReason") String failureReason,
+            @Param("matchedAt") OffsetDateTime matchedAt
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET is_saved = true,
+                course_name = :courseName
+            WHERE session_id = :sessionId
+            """, nativeQuery = true)
+    int saveWalkRecord(
+            @Param("sessionId") Long sessionId,
+            @Param("courseName") String courseName
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET is_representative = false
+            WHERE user_id = :userId
+              AND is_representative = true
+            """, nativeQuery = true)
+    int clearRepresentativeWalks(@Param("userId") Long userId);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
+            SET is_representative = :representative
+            WHERE session_id = :sessionId
+            """, nativeQuery = true)
+    int setRepresentative(
+            @Param("sessionId") Long sessionId,
+            @Param("representative") boolean representative
     );
 
     /**
@@ -112,7 +203,15 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
                         ) AS "usablePointCount",
                         COUNT(DISTINCT ST_AsEWKB(point.location)) FILTER (
                             WHERE point.accuracy_m <= 40.0
-                        ) AS "distinctUsableLocationCount"
+                        ) AS "distinctUsableLocationCount",
+                        session.match_status AS "matchStatus",
+                        session.match_failure_reason AS "matchFailureReason",
+                        ARRAY_TO_STRING(session.matched_segments, ',') AS "matchedSegmentIdsCsv",
+                        session.is_loop AS "isLoop",
+                        CASE
+                            WHEN session.track_geom IS NULL THEN NULL
+                            ELSE ST_AsGeoJSON(ST_Transform(session.track_geom, 4326))
+                        END AS "trackGeoJson"
                     FROM walk_session AS session
                     LEFT JOIN walk_track_point AS point
                       ON point.session_id = session.session_id
@@ -121,7 +220,12 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
                         session.session_id,
                         session.ended_at,
                         session.distance_m,
-                        session.duration_sec
+                        session.duration_sec,
+                        session.match_status,
+                        session.match_failure_reason,
+                        session.matched_segments,
+                        session.is_loop,
+                        session.track_geom
                     """,
             nativeQuery = true
     )
