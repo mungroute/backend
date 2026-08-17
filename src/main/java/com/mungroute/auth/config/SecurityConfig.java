@@ -50,6 +50,8 @@ public class SecurityConfig {
                                 "/api/auth/check-nickname",
                                 "/api/auth/phone-verifications",
                                 "/api/auth/password-reset/**",
+                                "/ws",
+                                "/ws/**",
                                 "/api/health",
                                 "/actuator/health",
                                 "/actuator/info",

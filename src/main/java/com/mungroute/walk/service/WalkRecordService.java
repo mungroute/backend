@@ -46,6 +46,7 @@ public class WalkRecordService {
         if (request.representative()) {
             validateRepresentativeEligibility(session);
             walkSessionRepository.clearRepresentativeWalks(userId);
+            walkSessionRepository.clearCustomRepresentativeCourses(userId);
             walkSessionRepository.setRepresentative(sessionId, true);
         }
         return detail(userId, sessionId);
@@ -64,6 +65,7 @@ public class WalkRecordService {
         if (representative) {
             validateRepresentativeEligibility(session);
             walkSessionRepository.clearRepresentativeWalks(userId);
+            walkSessionRepository.clearCustomRepresentativeCourses(userId);
         }
         walkSessionRepository.setRepresentative(sessionId, representative);
         return detail(userId, sessionId);

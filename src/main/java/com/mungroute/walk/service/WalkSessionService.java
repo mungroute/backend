@@ -1,6 +1,8 @@
 package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
+import com.mungroute.proximity.repository.PresenceRepository;
+import com.mungroute.proximity.store.PresenceLocationStore;
 import tools.jackson.databind.ObjectMapper;
 import com.mungroute.course.matching.MapMatchingFailure;
 import com.mungroute.course.matching.MapMatchingResult;
@@ -10,7 +12,9 @@ import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
+import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.dto.request.StartWalkRequest;
+import com.mungroute.walk.dto.response.ChangeWalkModeResponse;
 import com.mungroute.walk.dto.response.EndWalkResponse;
 import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.exception.WalkErrorCode;
@@ -31,6 +35,8 @@ public class WalkSessionService {
     private final SimpleMapMatchingService mapMatchingService;
     private final WalkMatchOutcomeService matchOutcomeService;
     private final ObjectMapper objectMapper;
+    private final PresenceRepository presenceRepository;
+    private final PresenceLocationStore presenceLocationStore;
 
     public WalkSessionService(
             AppUserRepository appUserRepository,
@@ -39,7 +45,9 @@ public class WalkSessionService {
             WalkFinalizationService walkFinalizationService,
             SimpleMapMatchingService mapMatchingService,
             WalkMatchOutcomeService matchOutcomeService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            PresenceRepository presenceRepository,
+            PresenceLocationStore presenceLocationStore
     ) {
         this.appUserRepository = appUserRepository;
         this.walkSessionRepository = walkSessionRepository;
@@ -48,6 +56,8 @@ public class WalkSessionService {
         this.mapMatchingService = mapMatchingService;
         this.matchOutcomeService = matchOutcomeService;
         this.objectMapper = objectMapper;
+        this.presenceRepository = presenceRepository;
+        this.presenceLocationStore = presenceLocationStore;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
@@ -61,7 +71,17 @@ public class WalkSessionService {
                         )
                 );
 
-        validateNoActiveWalk(userId);
+        // Starting a walk is idempotent for a user. A browser refresh or a server
+        // restart must recover the active session instead of trapping the user in
+        // ACTIVE_WALK_ALREADY_EXISTS conflicts.
+        var activeSession = walkSessionRepository.findActiveByUserIdForUpdate(userId);
+        if (activeSession.isPresent()) {
+            WalkSession session = activeSession.get();
+            if (session.isPaused()) {
+                walkSessionRepository.resumeWalkSession(session.getSessionId(), OffsetDateTime.now());
+            }
+            return StartWalkResponse.from(session);
+        }
 
         WalkMode mode = WalkMode.from(request.mode());
 
@@ -154,6 +174,9 @@ public class WalkSessionService {
                         )
                 );
 
+        presenceRepository.deleteBySessionId(sessionId);
+        presenceLocationStore.delete(sessionId);
+
         return EndWalkResponse.from(summary, objectMapper);
     }
 
@@ -167,6 +190,7 @@ public class WalkSessionService {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
         }
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
+        presenceLocationStore.delete(sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
     }
 
@@ -183,14 +207,49 @@ public class WalkSessionService {
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "ACTIVE", changedAt);
     }
 
-    // 사용자에게 이미 활성 산책이 있으면 시작을 거부함
-    private void validateNoActiveWalk(Long userId) {
-        boolean activeWalkExists = walkSessionRepository.existsByUser_UserIdAndEndedAtIsNull(userId);
+    @Transactional
+    public ChangeWalkModeResponse changeMode(
+            Long userId,
+            Long sessionId,
+            ChangeWalkModeRequest request
+    ) {
+        OffsetDateTime changedAt = OffsetDateTime.now();
+        WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
 
-        if (activeWalkExists) {
-            throw new BusinessException(
-                    WalkErrorCode.ACTIVE_WALK_ALREADY_EXISTS
-            );
+        validateOwner(session, userId);
+        if (!session.isActive()) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
+        }
+
+        WalkMode nextMode = WalkMode.from(request.mode());
+        validateModeTransition(session, nextMode);
+        session.changeMode(nextMode);
+
+        if (nextMode == WalkMode.OFF) {
+            presenceRepository.deleteBySessionId(sessionId);
+            presenceLocationStore.delete(sessionId);
+        } else {
+            // 동의가 끝난 세션에 대해서만 active_presence 행이 존재한다.
+            // 아직 동의하지 않은 경우 0행 갱신은 정상이며, 동의 API가 새 모드로 행을 생성한다.
+            presenceRepository.updateMode(sessionId, nextMode.getValue(), changedAt);
+        }
+
+        return new ChangeWalkModeResponse(
+                sessionId,
+                nextMode.getValue(),
+                session.getLockedMode() == null ? null : session.getLockedMode().getValue(),
+                changedAt
+        );
+    }
+
+    private void validateModeTransition(WalkSession session, WalkMode nextMode) {
+        if (nextMode == WalkMode.OFF) {
+            return;
+        }
+
+        if (session.getLockedMode() == null || session.getLockedMode() != nextMode) {
+            throw new BusinessException(WalkErrorCode.WALK_MODE_CHANGE_NOT_ALLOWED);
         }
     }
 

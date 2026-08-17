@@ -12,8 +12,14 @@ import java.time.OffsetDateTime;
 import java.util.Optional;
 
 public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> {
-    // 해당 사용자에게 종료되지 않은 산책이 있는지 확인한다.
-    boolean existsByUser_UserIdAndEndedAtIsNull(Long userId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT ws
+            FROM WalkSession ws
+            WHERE ws.user.userId = :userId
+              AND ws.endedAt IS NULL
+            """)
+    Optional<WalkSession> findActiveByUserIdForUpdate(@Param("userId") Long userId);
 
 
     // GPS 포인트 추가와 산책 종료 시 세션 행을 쓰기 잠금으로 조회 (Read Only)
@@ -175,6 +181,15 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
               AND is_representative = true
             """, nativeQuery = true)
     int clearRepresentativeWalks(@Param("userId") Long userId);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE custom_course
+            SET is_representative = false, updated_at = now()
+            WHERE user_id = :userId
+              AND is_representative = true
+            """, nativeQuery = true)
+    int clearCustomRepresentativeCourses(@Param("userId") Long userId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """

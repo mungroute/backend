@@ -2,6 +2,7 @@ package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
+import com.mungroute.walk.dto.request.StartWalkRequest;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.exception.WalkErrorCode;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,9 @@ class WalkRecordFlowIntegrationTest {
 
     @Autowired
     WalkRecordService recordService;
+
+    @Autowired
+    WalkSessionService sessionService;
 
     @Autowired
     JdbcTemplate jdbcTemplate;
@@ -100,6 +104,70 @@ class WalkRecordFlowIntegrationTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(WalkErrorCode.REPRESENTATIVE_COURSE_INELIGIBLE));
+    }
+
+    @Test
+    void resumesAnEmptyActiveSessionWhenStartingAgain() {
+        long userId = insertUser();
+        long orphanedSessionId = jdbcTemplate.queryForObject("""
+                INSERT INTO walk_session(user_id, started_at, mode)
+                VALUES (?, now() - interval '5 minutes', 'off')
+                RETURNING session_id
+                """, Long.class, userId);
+
+        var started = sessionService.startWalk(userId, new StartWalkRequest("distance"));
+
+        assertThat(started.sessionId()).isEqualTo(orphanedSessionId);
+        assertThat(started.mode()).isEqualTo("off");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM walk_session WHERE session_id = ?",
+                Integer.class,
+                orphanedSessionId
+        )).isOne();
+    }
+
+    @Test
+    void resumesAnActiveSessionThatAlreadyContainsGpsPoints() {
+        long userId = insertUser();
+        long sessionId = jdbcTemplate.queryForObject("""
+                INSERT INTO walk_session(user_id, started_at, mode)
+                VALUES (?, now() - interval '5 minutes', 'off')
+                RETURNING session_id
+                """, Long.class, userId);
+        jdbcTemplate.update("""
+                INSERT INTO walk_track_point(session_id, recorded_at, location, accuracy_m)
+                VALUES (?, now(), ST_Transform(ST_SetSRID(ST_MakePoint(126.978, 37.5665), 4326), 5186), 5.0)
+                """, sessionId);
+
+        var started = sessionService.startWalk(userId, new StartWalkRequest("distance"));
+
+        assertThat(started.sessionId()).isEqualTo(sessionId);
+        assertThat(started.mode()).isEqualTo("off");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM walk_track_point WHERE session_id = ?",
+                Integer.class,
+                sessionId
+        )).isOne();
+    }
+
+    @Test
+    void resumesAPausedActiveSessionBeforeReturningIt() {
+        long userId = insertUser();
+        long sessionId = jdbcTemplate.queryForObject("""
+                INSERT INTO walk_session(user_id, started_at, paused_at, mode)
+                VALUES (?, now() - interval '5 minutes', now() - interval '1 minute', 'distance')
+                RETURNING session_id
+                """, Long.class, userId);
+
+        var started = sessionService.startWalk(userId, new StartWalkRequest("off"));
+
+        assertThat(started.sessionId()).isEqualTo(sessionId);
+        assertThat(started.mode()).isEqualTo("distance");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT paused_at IS NULL FROM walk_session WHERE session_id = ?",
+                Boolean.class,
+                sessionId
+        )).isTrue();
     }
 
     private long insertUser() {

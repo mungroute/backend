@@ -1,10 +1,12 @@
 package com.mungroute.walk.controller;
 
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
+import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.dto.request.StartWalkRequest;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
 import com.mungroute.walk.dto.request.SetRepresentativeRequest;
 import com.mungroute.walk.dto.response.EndWalkResponse;
+import com.mungroute.walk.dto.response.ChangeWalkModeResponse;
 import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.dto.response.WalkRecordSummaryResponse;
@@ -99,6 +101,19 @@ public class WalkSessionController {
             @PathVariable @Positive Long sessionId
     ) {
         return ResponseEntity.ok(walkSessionService.resumeWalk(principal.userId(), sessionId));
+    }
+
+    @PatchMapping("/{sessionId}/mode")
+    public ResponseEntity<ChangeWalkModeResponse> changeMode(
+            @AuthenticationPrincipal MungrouteUserPrincipal principal,
+            @PathVariable @Positive Long sessionId,
+            @Valid @RequestBody ChangeWalkModeRequest request
+    ) {
+        return ResponseEntity.ok(walkSessionService.changeMode(
+                principal.userId(),
+                sessionId,
+                request
+        ));
     }
 
     @PostMapping("/{sessionId}/save")

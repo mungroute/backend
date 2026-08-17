@@ -34,6 +34,9 @@ public class WalkSession {
     @Column(name = "mode", nullable = false, length = 10)
     private WalkMode mode;
 
+    @Column(name = "locked_mode", length = 10)
+    private WalkMode lockedMode;
+
     @Column(name = "distance_m", precision = 8, scale = 1)
     private BigDecimal distanceM;
 
@@ -81,6 +84,7 @@ public class WalkSession {
     ) {
         this.user = user;
         this.mode = mode;
+        this.lockedMode = mode == WalkMode.OFF ? null : mode;
         this.startedAt = startedAt;
     }
 
@@ -120,6 +124,14 @@ public class WalkSession {
 
     public WalkMode getMode() {
         return mode;
+    }
+
+    public WalkMode getLockedMode() {
+        return lockedMode;
+    }
+
+    public void changeMode(WalkMode mode) {
+        this.mode = mode;
     }
 
     public BigDecimal getDistanceM() {

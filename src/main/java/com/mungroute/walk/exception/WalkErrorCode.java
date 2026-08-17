@@ -13,7 +13,8 @@ public enum WalkErrorCode implements ErrorCode {
     WALK_SESSION_NOT_ENDED(HttpStatus.CONFLICT, "종료된 산책만 저장할 수 있습니다."),
     WALK_SESSION_NOT_SAVED(HttpStatus.CONFLICT, "저장된 산책 기록이 아닙니다."),
     REPRESENTATIVE_COURSE_INELIGIBLE(HttpStatus.valueOf(422), "맵매칭된 루프 코스만 대표 코스로 지정할 수 있습니다."),
-    INVALID_RECORDED_AT(HttpStatus.valueOf(422),"GPS 기록 시각이 허용 범위를 벗어났습니다.");
+    INVALID_RECORDED_AT(HttpStatus.valueOf(422),"GPS 기록 시각이 허용 범위를 벗어났습니다."),
+    WALK_MODE_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "산책 중에는 처음 선택한 모드와 끄기 사이에서만 변경할 수 있습니다.");
 
     private final HttpStatus status;
     private final String message;
