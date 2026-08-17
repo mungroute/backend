@@ -65,7 +65,11 @@ Location: /api/walks/42
 ### 처리 규칙
 
 - `started_at`은 DB 또는 애플리케이션 서버의 현재 시각으로 생성한다.
-- 같은 사용자에게 활성 세션(`ended_at IS NULL`)이 있으면 새로 만들지 않는다.
+- 같은 사용자에게 활성 세션(`ended_at IS NULL`)이 있으면 새로 만들지 않고 기존
+  `sessionId`, `startedAt`, `mode`를 동일한 응답 형식으로 반환한다.
+- 기존 세션이 일시정지 상태라면 누적 일시정지 시간을 반영하고 활성 상태로 복구한다.
+- 따라서 브라우저 새로고침이나 서버 재시작 뒤 같은 사용자가 다시 호출해도
+  `ACTIVE_WALK_ALREADY_EXISTS` 충돌을 반환하지 않는다.
 - 구현 시 새 Flyway migration으로 다음 partial unique index를 추가한다.
   이미 적용된 V2는 수정하지 않는다.
 
@@ -81,7 +85,6 @@ CREATE UNIQUE INDEX uk_walk_session_one_active_per_user
 | --- | ---: | --- |
 | JSON/필드 검증 실패 | 400 | `VALIDATION_ERROR` |
 | 사용자가 없음 | 404 | `USER_NOT_FOUND` |
-| 이미 활성 세션이 있음 | 409 | `ACTIVE_WALK_ALREADY_EXISTS` |
 
 ## 2. GPS 포인트 기록
 
@@ -222,9 +225,9 @@ HTTP/1.1 200 OK
   "type": "about:blank",
   "title": "Conflict",
   "status": 409,
-  "detail": "이미 진행 중인 산책이 있습니다.",
-  "instance": "/api/walks/start",
-  "code": "ACTIVE_WALK_ALREADY_EXISTS",
+  "detail": "이미 종료된 산책입니다.",
+  "instance": "/api/walks/42/points",
+  "code": "WALK_SESSION_ALREADY_ENDED",
   "timestamp": "2026-08-10T10:30:00.123+09:00",
   "errors": []
 }

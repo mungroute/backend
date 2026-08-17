@@ -19,4 +19,14 @@ public interface EndWalkSummary {
     Long getUsablePointCount();
 
     Long getDistinctUsableLocationCount();
+
+    String getMatchStatus();
+
+    String getMatchFailureReason();
+
+    String getMatchedSegmentIdsCsv();
+
+    Boolean getIsLoop();
+
+    String getTrackGeoJson();
 }

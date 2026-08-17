@@ -11,6 +11,7 @@ import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.user.controller.UserController;
 import com.mungroute.user.dto.response.UserResponse;
 import com.mungroute.walk.controller.WalkSessionController;
+import com.mungroute.walk.service.WalkRecordService;
 import com.mungroute.walk.service.WalkSessionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -58,6 +59,9 @@ class SecurityAccessTest {
 
     @MockitoBean
     WalkSessionService walkSessionService;
+
+    @MockitoBean
+    WalkRecordService walkRecordService;
 
     @MockitoBean
     AuthService authService;

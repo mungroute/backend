@@ -1,0 +1,10 @@
+package com.mungroute.course.domain;
+
+public enum AlternativeReason {
+    NO_ALTERNATIVE_PATH,
+    NO_CANDIDATE_MEETS_DETOUR_LIMIT,
+    NO_CANDIDATE_MEETS_TIME,
+    NO_TEMPERATURE_IMPROVEMENT,
+    THERMAL_DATA_UNAVAILABLE,
+    COURSE_NOT_CONNECTED
+}

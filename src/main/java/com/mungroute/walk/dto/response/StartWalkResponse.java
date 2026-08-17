@@ -8,14 +8,16 @@ import java.time.OffsetDateTime;
 public record StartWalkResponse(
         Long sessionId,
         OffsetDateTime startedAt,
-        String mode
+        String mode,
+        String lockedMode
 ){
     // 저장된 WalkSession을 API 응답으로 변환
     public static StartWalkResponse from(WalkSession session) {
         return new StartWalkResponse(
                 session.getSessionId(),
                 session.getStartedAt(),
-                session.getMode().getValue()
+                session.getMode().getValue(),
+                session.getLockedMode() == null ? null : session.getLockedMode().getValue()
         );
     }
 }
