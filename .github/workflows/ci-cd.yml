@@ -86,7 +86,7 @@ jobs:
   deploy:
     name: Deploy to Render
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     environment: production
 
