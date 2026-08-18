@@ -17,6 +17,8 @@ public record WalkRecordDetailRow(
         String matchedSegmentIdsCsv,
         Long pointCount,
         Long usablePointCount,
-        String trackGeoJson
+        String trackGeoJson,
+        String dogSnapshotsJson,
+        long distanceAlertCount
 ) {
 }

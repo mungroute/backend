@@ -2,6 +2,7 @@ package com.mungroute.proximity.repository;
 
 import java.time.OffsetDateTime;
 import java.math.BigDecimal;
+import java.util.List;
 
 public interface PresenceRepository {
 
@@ -29,4 +30,22 @@ public interface PresenceRepository {
     );
 
     int deleteBySessionId(long sessionId);
+
+    int recordProximityNotification(
+            long recipientSessionId,
+            long otherSessionId,
+            String distanceBand,
+            Integer bearingOctant,
+            Integer bearingSpread,
+            String trend,
+            OffsetDateTime notifiedAt
+    );
+
+    int endProximityEvents(
+            long recipientSessionId,
+            List<Long> otherSessionIds,
+            OffsetDateTime endedAt
+    );
+
+    int endAllProximityEvents(long sessionId, OffsetDateTime endedAt);
 }

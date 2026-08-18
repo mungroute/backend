@@ -61,7 +61,7 @@ public class PresenceUpdateService {
         );
         presenceLocationStore.update(origin);
 
-        List<NearbyPresenceResponse> nearby = presenceLocationStore.findNearby(
+        List<ClassifiedPresence> classifiedNearby = presenceLocationStore.findNearby(
                         origin,
                         request.radiusM() + CANDIDATE_ACCURACY_BUFFER_METERS,
                         REDIS_CANDIDATE_LIMIT
@@ -79,11 +79,45 @@ public class PresenceUpdateService {
                 )))
                 .toList();
 
+        var transition = presenceLocationStore.synchronizeNearbySessions(
+                origin.sessionId(),
+                classifiedNearby.stream().map(ClassifiedPresence::otherSessionId).toList()
+        );
+        presenceRepository.endProximityEvents(
+                origin.sessionId(), transition.leftSessionIds(), updatedAt);
+        for (long enteredSessionId : transition.enteredSessionIds()) {
+            classifiedNearby.stream()
+                    .filter(candidate -> candidate.otherSessionId() == enteredSessionId)
+                    .findFirst()
+                    .ifPresent(candidate -> recordNotification(origin.sessionId(), candidate, updatedAt));
+        }
+
+        List<NearbyPresenceResponse> nearby = classifiedNearby.stream()
+                .map(ClassifiedPresence::response)
+                .toList();
+
         return new PresenceUpdateResponse(
                 request.sessionId(),
                 updatedAt,
                 request.stationary() ? 10 : 4,
                 nearby
+        );
+    }
+
+    private void recordNotification(
+            long recipientSessionId,
+            ClassifiedPresence candidate,
+            OffsetDateTime notifiedAt
+    ) {
+        NearbyPresenceResponse response = candidate.response();
+        presenceRepository.recordProximityNotification(
+                recipientSessionId,
+                candidate.otherSessionId(),
+                response.distanceBand(),
+                response.directionOctant(),
+                response.directionSpread(),
+                response.trend(),
+                notifiedAt
         );
     }
 
@@ -232,13 +266,18 @@ public class PresenceUpdateService {
             double distanceMeters,
             NearbyPresenceResponse response
     ) {
-        NearbyPresenceResponse withTrend(List<Double> history) {
-            return new NearbyPresenceResponse(
-                    response.distanceBand(),
-                    response.directionOctant(),
-                    response.directionSpread(),
-                    response.directionReference(),
-                    trend(history)
+        ClassifiedPresence withTrend(List<Double> history) {
+            return new ClassifiedPresence(
+                    sortDistanceMeters,
+                    otherSessionId,
+                    distanceMeters,
+                    new NearbyPresenceResponse(
+                            response.distanceBand(),
+                            response.directionOctant(),
+                            response.directionSpread(),
+                            response.directionReference(),
+                            trend(history)
+                    )
             );
         }
     }

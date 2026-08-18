@@ -16,6 +16,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     boolean existsByNickname(String nickname);
 
+    boolean existsByNicknameAndUserIdNot(String nickname, Long userId);
+
     boolean existsByPhoneNumber(String phoneNumber);
 
     // 산책 시작을 직렬화하기 위해 사용자 행을 쓰기 잠금으로 조회

@@ -32,6 +32,10 @@ public class UserProfileService {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
         String nickname = request.nickname() == null ? user.getNickname() : request.nickname().trim();
+        if (!nickname.equals(user.getNickname())
+                && userRepository.existsByNicknameAndUserIdNot(nickname, userId)) {
+            throw new BusinessException(UserErrorCode.NICKNAME_DUPLICATED);
+        }
         String image = request.profileImageUrl() == null ? user.getProfileImageUrl() : normalizeImage(request.profileImageUrl());
         user.updateProfile(nickname, image);
         try {
@@ -40,6 +44,10 @@ public class UserProfileService {
             throw new BusinessException(UserErrorCode.NICKNAME_DUPLICATED);
         }
         return UserResponse.from(user);
+    }
+
+    public boolean isNicknameAvailable(long userId, String nickname) {
+        return !userRepository.existsByNicknameAndUserIdNot(nickname.trim(), userId);
     }
 
     @Transactional

@@ -3,6 +3,7 @@ package com.mungroute.user;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.dto.request.DogProfileRequest;
 import com.mungroute.user.dto.request.NotificationSettingRequest;
+import com.mungroute.user.dto.request.UpdateUserProfileRequest;
 import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.user.repository.DogProfileRepository;
 import com.mungroute.user.service.DogProfileService;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -34,6 +36,29 @@ class UserProfileFlowIntegrationTest {
     @Autowired UserProfileService userProfileService;
     @Autowired WalkSessionRepository walkSessionRepository;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void checksNicknameAvailabilityExcludingTheCurrentUserAndRejectsDuplicates() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AppUser current = userRepository.save(AppUser.register(
+                "account-" + suffix + "@example.com", "현재닉네임" + suffix,
+                "{noop}password1", "015" + Math.floorMod(suffix.hashCode(), 100_000_000)));
+        AppUser other = userRepository.save(AppUser.register(
+                "other-" + suffix + "@example.com", "다른닉네임" + suffix,
+                "{noop}password1", "014" + Math.floorMod(suffix.hashCode(), 100_000_000)));
+
+        assertThat(userProfileService.isNicknameAvailable(current.getUserId(), current.getNickname())).isTrue();
+        assertThat(userProfileService.isNicknameAvailable(current.getUserId(), other.getNickname())).isFalse();
+        assertThat(userProfileService.isNicknameAvailable(current.getUserId(), "새닉네임" + suffix)).isTrue();
+        assertThatThrownBy(() -> userProfileService.update(
+                current.getUserId(), new UpdateUserProfileRequest(other.getNickname(), null)))
+                .isInstanceOf(com.mungroute.global.exception.BusinessException.class);
+
+        var updated = userProfileService.update(
+                current.getUserId(), new UpdateUserProfileRequest("새닉네임" + suffix, null));
+        assertThat(updated.nickname()).isEqualTo("새닉네임" + suffix);
+        assertThat(updated.email()).isEqualTo(current.getEmail());
+    }
 
     @Test
     void persistsDogsDefaultsNotificationsAndWalkSnapshot() {

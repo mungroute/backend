@@ -5,11 +5,13 @@ import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.dto.request.StartWalkRequest;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
 import com.mungroute.walk.dto.request.SetRepresentativeRequest;
+import com.mungroute.walk.dto.request.RenameWalkRequest;
 import com.mungroute.walk.dto.response.EndWalkResponse;
 import com.mungroute.walk.dto.response.ChangeWalkModeResponse;
 import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.dto.response.WalkRecordSummaryResponse;
+import com.mungroute.walk.dto.response.WalkStatisticsResponse;
 import com.mungroute.walk.dto.response.WalkStateResponse;
 import com.mungroute.walk.service.WalkRecordService;
 import com.mungroute.walk.service.WalkSessionService;
@@ -23,9 +25,13 @@ import com.mungroute.auth.security.MungrouteUserPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.time.OffsetDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 
 @Validated
@@ -142,9 +148,29 @@ public class WalkSessionController {
     public ResponseEntity<List<WalkRecordSummaryResponse>> listWalks(
             @AuthenticationPrincipal MungrouteUserPrincipal principal,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
+            @RequestParam(required = false) @Positive Long dogId
     ) {
-        return ResponseEntity.ok(walkRecordService.list(principal.userId(), page, size));
+        return ResponseEntity.ok(walkRecordService.list(
+                principal.userId(), page, size, from, to, dogId));
+    }
+
+    @GetMapping("/statistics")
+    public ResponseEntity<WalkStatisticsResponse> walkStatistics(
+            @AuthenticationPrincipal MungrouteUserPrincipal principal,
+            @RequestParam(required = false)
+            @DateTimeFormat(pattern = "yyyy-MM") YearMonth month,
+            @RequestParam(required = false) @Positive Long dogId
+    ) {
+        YearMonth selectedMonth = month == null
+                ? YearMonth.now(ZoneId.of("Asia/Seoul"))
+                : month;
+        return ResponseEntity.ok(walkRecordService.statistics(
+                principal.userId(), selectedMonth, dogId));
     }
 
     @GetMapping("/{sessionId}")
@@ -153,6 +179,16 @@ public class WalkSessionController {
             @PathVariable @Positive Long sessionId
     ) {
         return ResponseEntity.ok(walkRecordService.detail(principal.userId(), sessionId));
+    }
+
+    @PatchMapping("/{sessionId}/name")
+    public ResponseEntity<WalkRecordDetailResponse> renameWalk(
+            @AuthenticationPrincipal MungrouteUserPrincipal principal,
+            @PathVariable @Positive Long sessionId,
+            @Valid @RequestBody RenameWalkRequest request
+    ) {
+        return ResponseEntity.ok(walkRecordService.rename(
+                principal.userId(), sessionId, request));
     }
 
     @DeleteMapping("/{sessionId}")

@@ -12,6 +12,9 @@ public record WalkRecordSummaryRow(
         Integer durationSec,
         boolean representative,
         Boolean loop,
-        String matchStatus
+        String matchStatus,
+        String dogNamesJson,
+        long distanceAlertCount,
+        String routePreviewGeoJson
 ) {
 }

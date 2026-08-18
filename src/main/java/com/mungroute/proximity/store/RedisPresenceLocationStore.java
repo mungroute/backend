@@ -25,11 +25,13 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     static final String GEO_KEY = "presence:geo";
     static final String SESSION_KEY_PREFIX = "presence:session:";
     static final String HISTORY_KEY_PREFIX = "presence:history:";
+    static final String NEARBY_KEY_PREFIX = "presence:nearby:";
     static final String EXPIRY_KEY = "presence:expiry";
     static final String MEET_CANDIDATE_KEY_PREFIX = "meet:candidate:";
     static final String MEET_CANDIDATE_PAIR_KEY_PREFIX = "meet:candidate-pair:";
     private static final Duration LOCATION_TTL = Duration.ofSeconds(30);
     private static final Duration HISTORY_TTL = Duration.ofSeconds(60);
+    private static final Duration NEARBY_TTL = Duration.ofSeconds(30);
 
     private final StringRedisTemplate redisTemplate;
     private final AtomicLong nextCleanupAtMillis = new AtomicLong();
@@ -173,6 +175,41 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     }
 
     @Override
+    public NearbyPresenceTransition synchronizeNearbySessions(
+            long sessionId,
+            List<Long> nearbySessionIds
+    ) {
+        String key = NEARBY_KEY_PREFIX + sessionId;
+        Set<String> stored = redisTemplate.opsForSet().members(key);
+        Set<String> previous = stored == null ? Set.of() : Set.copyOf(stored);
+        Set<String> current = nearbySessionIds.stream()
+                .map(String::valueOf)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+        List<Long> entered = current.stream()
+                .filter(value -> !previous.contains(value))
+                .map(Long::valueOf)
+                .sorted()
+                .toList();
+        List<Long> left = previous.stream()
+                .filter(value -> !current.contains(value))
+                .map(Long::valueOf)
+                .sorted()
+                .toList();
+
+        if (!previous.equals(current)) {
+            redisTemplate.delete(key);
+            if (!current.isEmpty()) {
+                redisTemplate.opsForSet().add(key, current.toArray(String[]::new));
+            }
+        }
+        if (!current.isEmpty()) {
+            redisTemplate.expire(key, NEARBY_TTL);
+        }
+        return new NearbyPresenceTransition(entered, left);
+    }
+
+    @Override
     public String issueMeetCandidateRef(long viewerSessionId, long targetSessionId, long targetUserId) {
         String pairKey = MEET_CANDIDATE_PAIR_KEY_PREFIX + viewerSessionId + ":" + targetSessionId;
         String existing = redisTemplate.opsForValue().get(pairKey);
@@ -243,7 +280,8 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
         redisTemplate.opsForZSet().remove(EXPIRY_KEY, member);
         redisTemplate.delete(List.of(
                 SESSION_KEY_PREFIX + member,
-                HISTORY_KEY_PREFIX + member
+                HISTORY_KEY_PREFIX + member,
+                NEARBY_KEY_PREFIX + member
         ));
     }
 

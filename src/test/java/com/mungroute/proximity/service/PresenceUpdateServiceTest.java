@@ -4,6 +4,7 @@ import com.mungroute.global.exception.BusinessException;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
 import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
+import com.mungroute.proximity.store.NearbyPresenceTransition;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.user.domain.AppUser;
@@ -24,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +63,8 @@ class PresenceUpdateServiceTest {
                 ));
         when(presenceLocationStore.appendDistanceHistory(any(Long.class), any(Long.class), any(Double.class)))
                 .thenReturn(List.of(60.0, 52.0, 44.0));
+        when(presenceLocationStore.synchronizeNearbySessions(sessionId, List.of(28L)))
+                .thenReturn(new NearbyPresenceTransition(List.of(28L), List.of()));
 
         var response = service.update(userId, request(sessionId, OffsetDateTime.now()));
 
@@ -70,6 +75,34 @@ class PresenceUpdateServiceTest {
         assertThat(response.nearby().getFirst().directionReference()).isEqualTo("HEADING");
         assertThat(response.nearby().getFirst().trend()).isEqualTo("APPROACHING");
         verify(presenceLocationStore).update(any(PresenceLocation.class));
+        verify(presenceRepository).recordProximityNotification(
+                eq(sessionId), eq(28L), eq("BAND_30_50"), eq(0), eq(45), eq("APPROACHING"), any());
+    }
+
+    @Test
+    void doesNotDuplicateAContinuousNearbyNotification() {
+        long userId = 1L;
+        long sessionId = 27L;
+        WalkSession session = ownedDistanceSession(userId);
+        PresenceUpdateService service = new PresenceUpdateService(
+                walkSessionRepository, presenceRepository, presenceLocationStore);
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
+        when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
+        when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
+                .thenReturn(1);
+        when(presenceLocationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt()))
+                .thenReturn(List.of(new NearbyPresenceLocation(28L, 2L, "distance", 126.978, 37.5669, 7)));
+        when(presenceLocationStore.appendDistanceHistory(any(Long.class), any(Long.class), any(Double.class)))
+                .thenReturn(List.of(44.0, 43.0));
+        when(presenceLocationStore.synchronizeNearbySessions(sessionId, List.of(28L)))
+                .thenReturn(new NearbyPresenceTransition(List.of(), List.of()));
+
+        var response = service.update(userId, request(sessionId, OffsetDateTime.now()));
+
+        assertThat(response.nearby()).hasSize(1);
+        verify(presenceRepository, org.mockito.Mockito.never()).recordProximityNotification(
+                anyLong(), anyLong(), any(), any(), any(), any(), any());
     }
 
     @Test
