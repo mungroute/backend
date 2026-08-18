@@ -33,6 +33,12 @@ public class AppUser {
     @Column(name = "phone_number", nullable = false, length = 20)
     private String phoneNumber;
 
+    @Column(name = "profile_image_url", columnDefinition = "text")
+    private String profileImageUrl;
+
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -69,6 +75,22 @@ public class AppUser {
         this.passwordHash = passwordHash;
     }
 
+    public void updateProfile(String nickname, String profileImageUrl) {
+        this.nickname = nickname;
+        this.profileImageUrl = profileImageUrl;
+    }
+
+    public void deactivate(String replacementPasswordHash) {
+        String suffix = userId + "-" + System.nanoTime();
+        String phoneSuffix = "del-" + userId + "-" + Long.toUnsignedString(System.nanoTime(), 36);
+        this.email = "deleted-" + suffix + "@mungroute.invalid";
+        this.nickname = "탈퇴회원-" + suffix;
+        this.phoneNumber = phoneSuffix.substring(0, Math.min(20, phoneSuffix.length()));
+        this.passwordHash = replacementPasswordHash;
+        this.profileImageUrl = null;
+        this.deletedAt = OffsetDateTime.now();
+    }
+
     public Long getUserId() {
         return userId;
     }
@@ -87,6 +109,14 @@ public class AppUser {
 
     public String getPhoneNumber() {
         return phoneNumber;
+    }
+
+    public String getProfileImageUrl() {
+        return profileImageUrl;
+    }
+
+    public OffsetDateTime getDeletedAt() {
+        return deletedAt;
     }
 
     public OffsetDateTime getCreatedAt() {

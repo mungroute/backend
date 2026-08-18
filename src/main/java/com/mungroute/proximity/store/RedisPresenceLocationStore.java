@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.UUID;
 
 @Component
 public class RedisPresenceLocationStore implements PresenceLocationStore {
@@ -25,6 +26,8 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     static final String SESSION_KEY_PREFIX = "presence:session:";
     static final String HISTORY_KEY_PREFIX = "presence:history:";
     static final String EXPIRY_KEY = "presence:expiry";
+    static final String MEET_CANDIDATE_KEY_PREFIX = "meet:candidate:";
+    static final String MEET_CANDIDATE_PAIR_KEY_PREFIX = "meet:candidate-pair:";
     private static final Duration LOCATION_TTL = Duration.ofSeconds(30);
     private static final Duration HISTORY_TTL = Duration.ofSeconds(60);
 
@@ -167,6 +170,69 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
         );
         redisTemplate.expire(key, HISTORY_TTL);
         return List.copyOf(history);
+    }
+
+    @Override
+    public String issueMeetCandidateRef(long viewerSessionId, long targetSessionId, long targetUserId) {
+        String pairKey = MEET_CANDIDATE_PAIR_KEY_PREFIX + viewerSessionId + ":" + targetSessionId;
+        String existing = redisTemplate.opsForValue().get(pairKey);
+        if (existing != null) {
+            return existing;
+        }
+        String candidateRef = UUID.randomUUID().toString();
+        redisTemplate.opsForHash().putAll(MEET_CANDIDATE_KEY_PREFIX + candidateRef, Map.of(
+                "viewerSessionId", Long.toString(viewerSessionId),
+                "targetSessionId", Long.toString(targetSessionId),
+                "targetUserId", Long.toString(targetUserId)
+        ));
+        redisTemplate.expire(MEET_CANDIDATE_KEY_PREFIX + candidateRef, LOCATION_TTL);
+        redisTemplate.opsForValue().set(pairKey, candidateRef, LOCATION_TTL);
+        return candidateRef;
+    }
+
+    @Override
+    public Optional<MeetCandidateTarget> resolveMeetCandidateRef(long viewerSessionId, String candidateRef) {
+        Map<Object, Object> values = redisTemplate.opsForHash().entries(MEET_CANDIDATE_KEY_PREFIX + candidateRef);
+        if (values.isEmpty()) return Optional.empty();
+        try {
+            if (Long.parseLong(values.get("viewerSessionId").toString()) != viewerSessionId) {
+                return Optional.empty();
+            }
+            return Optional.of(new MeetCandidateTarget(
+                    Long.parseLong(values.get("targetSessionId").toString()),
+                    Long.parseLong(values.get("targetUserId").toString())
+            ));
+        } catch (RuntimeException exception) {
+            redisTemplate.delete(MEET_CANDIDATE_KEY_PREFIX + candidateRef);
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<PresenceLocation> findLocation(long sessionId) {
+        String member = Long.toString(sessionId);
+        Map<Object, Object> metadata = redisTemplate.opsForHash().entries(SESSION_KEY_PREFIX + member);
+        List<Point> positions = redisTemplate.opsForGeo().position(GEO_KEY, member);
+        if (metadata.isEmpty() || positions == null || positions.isEmpty() || positions.getFirst() == null) {
+            return Optional.empty();
+        }
+        try {
+            Point point = positions.getFirst();
+            Object heading = metadata.get("heading");
+            return Optional.of(new PresenceLocation(
+                    sessionId,
+                    Long.parseLong(metadata.get("userId").toString()),
+                    metadata.get("mode").toString(),
+                    point.getX(),
+                    point.getY(),
+                    Double.parseDouble(metadata.get("accuracy").toString()),
+                    heading == null ? null : Double.parseDouble(heading.toString()),
+                    Boolean.parseBoolean(metadata.get("stationary").toString()),
+                    OffsetDateTime.parse(metadata.get("updatedAt").toString())
+            ));
+        } catch (RuntimeException exception) {
+            return Optional.empty();
+        }
     }
 
     @Override
