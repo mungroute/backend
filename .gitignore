@@ -40,6 +40,7 @@ HELP.md
 .env
 .env.local
 application-local.yml
+application-prod.yml
 application-secret.yml
 
 ### OS ###

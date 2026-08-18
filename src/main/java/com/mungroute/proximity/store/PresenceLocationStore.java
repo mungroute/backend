@@ -21,5 +21,11 @@ public interface PresenceLocationStore {
             double distanceMeters
     );
 
+    String issueMeetCandidateRef(long viewerSessionId, long targetSessionId, long targetUserId);
+
+    Optional<MeetCandidateTarget> resolveMeetCandidateRef(long viewerSessionId, String candidateRef);
+
+    Optional<PresenceLocation> findLocation(long sessionId);
+
     void delete(long sessionId);
 }

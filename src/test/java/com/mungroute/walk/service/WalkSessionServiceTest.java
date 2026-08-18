@@ -3,6 +3,7 @@ package com.mungroute.walk.service;
 import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.meet.service.MeetService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.walk.domain.WalkMode;
@@ -57,6 +58,9 @@ class WalkSessionServiceTest {
 
     @Mock
     PresenceLocationStore presenceLocationStore;
+
+    @Mock
+    MeetService meetService;
 
     @InjectMocks
     WalkSessionService walkSessionService;

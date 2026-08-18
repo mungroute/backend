@@ -46,4 +46,4 @@ k6 run -e WS_URL=ws://localhost:8080/ws -e FIXTURE_PATH=./presence-fixtures.json
 - 응답에 상대방의 정확한 좌표, 거리, 사용자 ID, 세션 ID가 한 건도 포함되지 않음
 - Redis `used_memory`, CPU, `instantaneous_ops_per_sec`와 백엔드 CPU·메모리를 같은 시간대에 기록
 
-D14에서는 같은 fixture 생성 절차를 자동화한 뒤 500 → 1,000 → 2,500 → 5,000 VU로 확장하고 WebSocket 알림 지연도 함께 측정한다.
+D17에서는 같은 fixture 생성 절차를 자동화한 뒤 500 → 1,000 → 2,500 → 5,000 VU로 확장하고 WebSocket 알림 지연도 함께 측정한다.

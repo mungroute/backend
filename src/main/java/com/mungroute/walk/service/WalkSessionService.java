@@ -3,12 +3,14 @@ package com.mungroute.walk.service;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.meet.service.MeetService;
 import tools.jackson.databind.ObjectMapper;
 import com.mungroute.course.matching.MapMatchingFailure;
 import com.mungroute.course.matching.MapMatchingResult;
 import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.repository.AppUserRepository;
+import com.mungroute.user.service.DogProfileService;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
@@ -37,6 +39,8 @@ public class WalkSessionService {
     private final ObjectMapper objectMapper;
     private final PresenceRepository presenceRepository;
     private final PresenceLocationStore presenceLocationStore;
+    private final MeetService meetService;
+    private final DogProfileService dogProfileService;
 
     public WalkSessionService(
             AppUserRepository appUserRepository,
@@ -47,7 +51,9 @@ public class WalkSessionService {
             WalkMatchOutcomeService matchOutcomeService,
             ObjectMapper objectMapper,
             PresenceRepository presenceRepository,
-            PresenceLocationStore presenceLocationStore
+            PresenceLocationStore presenceLocationStore,
+            MeetService meetService,
+            DogProfileService dogProfileService
     ) {
         this.appUserRepository = appUserRepository;
         this.walkSessionRepository = walkSessionRepository;
@@ -58,6 +64,8 @@ public class WalkSessionService {
         this.objectMapper = objectMapper;
         this.presenceRepository = presenceRepository;
         this.presenceLocationStore = presenceLocationStore;
+        this.meetService = meetService;
+        this.dogProfileService = dogProfileService;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
@@ -80,6 +88,9 @@ public class WalkSessionService {
             if (session.isPaused()) {
                 walkSessionRepository.resumeWalkSession(session.getSessionId(), OffsetDateTime.now());
             }
+            if (!request.dogIds().isEmpty()) {
+                dogProfileService.attachToWalk(userId, session.getSessionId(), request.dogIds());
+            }
             return StartWalkResponse.from(session);
         }
 
@@ -93,6 +104,10 @@ public class WalkSessionService {
 
 
         WalkSession savedSession = walkSessionRepository.save(walkSession);
+
+        if (!request.dogIds().isEmpty()) {
+            dogProfileService.attachToWalk(userId, savedSession.getSessionId(), request.dogIds());
+        }
 
         return StartWalkResponse.from(savedSession);
 
@@ -176,6 +191,7 @@ public class WalkSessionService {
 
         presenceRepository.deleteBySessionId(sessionId);
         presenceLocationStore.delete(sessionId);
+        meetService.closeForSession(userId, sessionId);
 
         return EndWalkResponse.from(summary, objectMapper);
     }
@@ -191,6 +207,7 @@ public class WalkSessionService {
         }
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
         presenceLocationStore.delete(sessionId);
+        meetService.closeForSession(userId, sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
     }
 
@@ -229,6 +246,7 @@ public class WalkSessionService {
         if (nextMode == WalkMode.OFF) {
             presenceRepository.deleteBySessionId(sessionId);
             presenceLocationStore.delete(sessionId);
+            meetService.closeForSession(userId, sessionId);
         } else {
             // 동의가 끝난 세션에 대해서만 active_presence 행이 존재한다.
             // 아직 동의하지 않은 경우 0행 갱신은 정상이며, 동의 API가 새 모드로 행을 생성한다.
