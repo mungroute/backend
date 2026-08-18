@@ -132,7 +132,8 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
                        COALESCE(SUM(session.distance_m), 0) AS total_distance_m,
                        COALESCE(SUM(session.duration_sec), 0) AS total_duration_sec,
                        COALESCE(AVG(session.distance_m), 0) AS average_distance_m,
-                       COALESCE(AVG(session.duration_sec), 0) AS average_duration_sec
+                       COALESCE(AVG(session.duration_sec), 0) AS average_duration_sec,
+                       MAX(session.ended_at) AS last_walked_at
                 FROM walk_session session
                 """ + filter.whereClause();
         return jdbcTemplate.queryForObject(sql, (resultSet, rowNumber) -> new WalkStatisticsAggregateRow(
@@ -140,7 +141,8 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
                 resultSet.getBigDecimal("total_distance_m"),
                 resultSet.getLong("total_duration_sec"),
                 resultSet.getBigDecimal("average_distance_m"),
-                resultSet.getInt("average_duration_sec")
+                resultSet.getInt("average_duration_sec"),
+                resultSet.getObject("last_walked_at", OffsetDateTime.class)
         ), filter.args().toArray());
     }
 

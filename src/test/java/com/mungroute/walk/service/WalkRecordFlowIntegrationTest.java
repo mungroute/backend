@@ -145,6 +145,7 @@ class WalkRecordFlowIntegrationTest {
         assertThat(filtered.getFirst().routePreviewGeoJson()).isNotNull();
         assertThat(statistics.walkCount()).isOne();
         assertThat(statistics.totalDistanceM()).isEqualByComparingTo("1800.0");
+        assertThat(statistics.lastWalkedAt()).isNotNull();
         assertThat(statistics.favoriteCourse().courseName()).isEqualTo("망고의 점심 산책");
         assertThat(statistics.weekdayDistances()).hasSize(1);
     }

@@ -1,6 +1,7 @@
 package com.mungroute.walk.dto.response;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public record WalkStatisticsResponse(
@@ -12,6 +13,7 @@ public record WalkStatisticsResponse(
         BigDecimal averageDistanceM,
         int averageDurationSec,
         List<WalkWeekdayDistanceResponse> weekdayDistances,
-        WalkFavoriteCourseResponse favoriteCourse
+        WalkFavoriteCourseResponse favoriteCourse,
+        OffsetDateTime lastWalkedAt
 ) {
 }

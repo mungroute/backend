@@ -151,7 +151,7 @@ public class WalkRecordService {
         return new WalkStatisticsResponse(
                 month.toString(), dogId, aggregate.walkCount(), scale(aggregate.totalDistanceM(), 1),
                 aggregate.totalDurationSec(), scale(aggregate.averageDistanceM(), 1),
-                aggregate.averageDurationSec(), weekdays, favorite
+                aggregate.averageDurationSec(), weekdays, favorite, aggregate.lastWalkedAt()
         );
     }
 
