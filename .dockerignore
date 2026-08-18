@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IntelliJ
+.idea
+*.iml
+out
+
+# Gradle 캐시 / 로컬 빌드 결과
+.gradle
+build
+
+# 비밀값 / 환경변수
+.env
+.env.*
+!.env.example
+
+# 로그
+*.log
+logs
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# 로컬 Docker 설정
+docker-compose.yml
+docker-compose.yaml
+compose.yml
+compose.yaml
+
+# 문서 / 개발 산출물
+docs
+reports
+performance
+
+# 기타
+HELP.md
