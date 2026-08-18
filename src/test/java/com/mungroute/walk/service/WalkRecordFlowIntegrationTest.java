@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
+import java.time.Year;
 import java.time.ZoneId;
 import java.util.UUID;
 import java.util.List;
@@ -144,8 +145,39 @@ class WalkRecordFlowIntegrationTest {
         assertThat(filtered.getFirst().routePreviewGeoJson()).isNotNull();
         assertThat(statistics.walkCount()).isOne();
         assertThat(statistics.totalDistanceM()).isEqualByComparingTo("1800.0");
+        assertThat(statistics.lastWalkedAt()).isNotNull();
         assertThat(statistics.favoriteCourse().courseName()).isEqualTo("망고의 점심 산책");
         assertThat(statistics.weekdayDistances()).hasSize(1);
+    }
+
+    @Test
+    void aggregatesSavedWalksByKoreanCalendarDayForContributionExploration() {
+        long userId = insertUser();
+        long morningSessionId = insertEndedSession(userId, "MATCHED", true, "{101}");
+        long eveningSessionId = insertEndedSession(userId, "MATCHED", true, "{102}");
+        OffsetDateTime morning = OffsetDateTime.parse("2026-08-03T08:30:00+09:00");
+        OffsetDateTime evening = OffsetDateTime.parse("2026-08-03T19:10:00+09:00");
+        jdbcTemplate.update(
+                "UPDATE walk_session SET started_at = ?, ended_at = ?, distance_m = 650.0 WHERE session_id = ?",
+                morning.minusMinutes(20), morning, morningSessionId);
+        jdbcTemplate.update(
+                "UPDATE walk_session SET started_at = ?, ended_at = ?, distance_m = 1350.0, track_geom = NULL WHERE session_id = ?",
+                evening.minusMinutes(30), evening, eveningSessionId);
+        recordService.save(userId, morningSessionId, new SaveWalkRequest("아침 산책", false));
+        recordService.save(userId, eveningSessionId, new SaveWalkRequest("저녁 산책", false));
+
+        var contributions = recordService.contributions(userId, Year.of(2026), null);
+
+        assertThat(contributions.year()).isEqualTo(2026);
+        assertThat(contributions.days()).singleElement().satisfies(day -> {
+            assertThat(day.date()).isEqualTo(java.time.LocalDate.of(2026, 8, 3));
+            assertThat(day.totalDistanceM()).isEqualByComparingTo("2000.0");
+            assertThat(day.walkCount()).isEqualTo(2);
+            assertThat(day.records()).extracting("courseName")
+                    .containsExactly("아침 산책", "저녁 산책");
+            assertThat(day.records()).extracting("hasRoute")
+                    .containsExactly(true, false);
+        });
     }
 
     @Test

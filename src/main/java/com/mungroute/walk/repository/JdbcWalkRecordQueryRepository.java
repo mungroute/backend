@@ -132,7 +132,8 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
                        COALESCE(SUM(session.distance_m), 0) AS total_distance_m,
                        COALESCE(SUM(session.duration_sec), 0) AS total_duration_sec,
                        COALESCE(AVG(session.distance_m), 0) AS average_distance_m,
-                       COALESCE(AVG(session.duration_sec), 0) AS average_duration_sec
+                       COALESCE(AVG(session.duration_sec), 0) AS average_duration_sec,
+                       MAX(session.ended_at) AS last_walked_at
                 FROM walk_session session
                 """ + filter.whereClause();
         return jdbcTemplate.queryForObject(sql, (resultSet, rowNumber) -> new WalkStatisticsAggregateRow(
@@ -140,7 +141,8 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
                 resultSet.getBigDecimal("total_distance_m"),
                 resultSet.getLong("total_duration_sec"),
                 resultSet.getBigDecimal("average_distance_m"),
-                resultSet.getInt("average_duration_sec")
+                resultSet.getInt("average_duration_sec"),
+                resultSet.getObject("last_walked_at", OffsetDateTime.class)
         ), filter.args().toArray());
     }
 
@@ -175,6 +177,32 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
                 resultSet.getString("course_name"), resultSet.getLong("walk_count"),
                 resultSet.getInt("average_duration_sec")
         ), filter.args().toArray()).stream().findFirst();
+    }
+
+    @Override
+    public List<WalkContributionRecordRow> contributionRecords(
+            long userId,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            Long dogId
+    ) {
+        QueryParts filter = recordFilter(userId, from, to, dogId);
+        String sql = """
+                SELECT (session.ended_at AT TIME ZONE 'Asia/Seoul')::date AS walk_date,
+                       session.session_id, session.course_name, session.distance_m,
+                       session.started_at, session.track_geom IS NOT NULL AS has_route
+                FROM walk_session session
+                """ + filter.whereClause() + """
+                ORDER BY walk_date, session.started_at, session.session_id
+                """;
+        return jdbcTemplate.query(sql, (resultSet, rowNumber) -> new WalkContributionRecordRow(
+                resultSet.getObject("walk_date", java.time.LocalDate.class),
+                resultSet.getLong("session_id"),
+                resultSet.getString("course_name"),
+                resultSet.getBigDecimal("distance_m"),
+                resultSet.getObject("started_at", OffsetDateTime.class),
+                resultSet.getBoolean("has_route")
+        ), filter.args().toArray());
     }
 
     private QueryParts recordFilter(long userId, OffsetDateTime from, OffsetDateTime to, Long dogId) {

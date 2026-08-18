@@ -12,6 +12,7 @@ import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.dto.response.WalkRecordSummaryResponse;
 import com.mungroute.walk.dto.response.WalkStatisticsResponse;
+import com.mungroute.walk.dto.response.WalkContributionsResponse;
 import com.mungroute.walk.dto.response.WalkStateResponse;
 import com.mungroute.walk.service.WalkRecordService;
 import com.mungroute.walk.service.WalkSessionService;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.time.Year;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
@@ -171,6 +173,19 @@ public class WalkSessionController {
                 : month;
         return ResponseEntity.ok(walkRecordService.statistics(
                 principal.userId(), selectedMonth, dogId));
+    }
+
+    @GetMapping("/contributions")
+    public ResponseEntity<WalkContributionsResponse> walkContributions(
+            @AuthenticationPrincipal MungrouteUserPrincipal principal,
+            @RequestParam(required = false) @Min(2020) @Max(2100) Integer year,
+            @RequestParam(required = false) @Positive Long dogId
+    ) {
+        Year selectedYear = Year.of(year == null
+                ? Year.now(ZoneId.of("Asia/Seoul")).getValue()
+                : year);
+        return ResponseEntity.ok(walkRecordService.contributions(
+                principal.userId(), selectedYear, dogId));
     }
 
     @GetMapping("/{sessionId}")
