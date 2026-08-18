@@ -1,6 +1,6 @@
 # Render + Supabase 배포 가이드
 
-이 저장소는 GitHub Actions로 테스트와 Docker 빌드를 검증하고, `main` 브랜치에 반영된 커밋만 Render에 배포한다. 운영 DB 스키마는 애플리케이션 시작 시 Flyway가 `src/main/resources/db/migration`의 변경을 Supabase PostgreSQL에 적용한다.
+이 저장소는 GitHub Actions로 테스트와 Docker 빌드를 검증하고, `develop` 브랜치에 반영된 커밋만 Render에 배포한다. 운영 DB 스키마는 애플리케이션 시작 시 Flyway가 `src/main/resources/db/migration`의 변경을 Supabase PostgreSQL에 적용한다.
 
 ## 1. Supabase 준비
 
@@ -74,7 +74,7 @@ Render 서비스의 Settings > Deploy Hook에서 URL을 복사해 `RENDER_DEPLOY
 ## 5. 배포 흐름
 
 - `develop`, `main` 대상 PR 및 push: PostgreSQL/PostGIS/pgRouting과 Redis를 띄우고 Gradle 테스트, jar 빌드, Docker 이미지 빌드를 검증한다.
-- `main` push: 검증 성공 후 Render Deploy Hook을 호출한다.
+- `develop` push: 검증 성공 후 Render Deploy Hook을 호출한다.
 - Render 시작: Flyway가 Supabase에 아직 적용되지 않은 마이그레이션을 실행한 뒤 서버가 기동한다.
 
-저장소의 실제 운영 브랜치가 `main`이 아니라면 `.github/workflows/ci-cd.yml`의 deploy job 조건을 해당 브랜치로 변경한다.
+Render 서비스가 연결된 브랜치도 `develop`으로 설정한다.
