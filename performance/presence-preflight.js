@@ -6,11 +6,17 @@ import { Counter, Rate, Trend } from 'k6/metrics'
 const baseUrl = __ENV.BASE_URL || 'http://localhost:8080'
 const targetVus = Number(__ENV.TARGET_VUS || 500)
 const smoke = __ENV.SMOKE === 'true'
+const directRamp = __ENV.DIRECT_RAMP === 'true'
 const fixturePath = __ENV.PRESENCE_FIXTURES || './presence-fixtures.json'
 const fixtures = new SharedArray('presence sessions', () => JSON.parse(open(fixturePath)))
 
 if (fixtures.length < targetVus && __ENV.ALLOW_FIXTURE_REUSE !== 'true') {
   fail(`Need at least ${targetVus} distinct presence fixtures; received ${fixtures.length}.`)
+}
+
+const functionalThresholds = {
+  http_req_failed: ['rate<0.01'],
+  privacy_contract_failed: ['rate==0'],
 }
 
 export const options = {
@@ -22,6 +28,10 @@ export const options = {
         { duration: '5s', target: targetVus },
         { duration: '15s', target: targetVus },
         { duration: '5s', target: 0 },
+      ] : directRamp ? [
+        { duration: __ENV.REST_RAMP_DURATION || '1m', target: targetVus },
+        { duration: __ENV.REST_HOLD_DURATION || '2m', target: targetVus },
+        { duration: __ENV.REST_RAMP_DOWN_DURATION || '30s', target: 0 },
       ] : [
         { duration: '30s', target: Math.min(50, targetVus) },
         { duration: '1m', target: Math.min(50, targetVus) },
@@ -34,10 +44,9 @@ export const options = {
       gracefulRampDown: '15s',
     },
   },
-  thresholds: {
-    http_req_failed: ['rate<0.01'],
+  thresholds: smoke ? functionalThresholds : {
+    ...functionalThresholds,
     presence_update_duration: ['p(95)<300', 'p(99)<700'],
-    privacy_contract_failed: ['rate==0'],
   },
 }
 
