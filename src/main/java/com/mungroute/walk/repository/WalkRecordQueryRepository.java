@@ -16,4 +16,11 @@ public interface WalkRecordQueryRepository {
     List<WalkWeekdayDistanceRow> weekdayDistances(long userId, OffsetDateTime from, OffsetDateTime to, Long dogId);
 
     Optional<WalkFavoriteCourseRow> favoriteCourse(long userId, OffsetDateTime from, OffsetDateTime to, Long dogId);
+
+    List<WalkContributionRecordRow> contributionRecords(
+            long userId,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            Long dogId
+    );
 }

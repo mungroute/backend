@@ -177,6 +177,32 @@ public class JdbcWalkRecordQueryRepository implements WalkRecordQueryRepository 
         ), filter.args().toArray()).stream().findFirst();
     }
 
+    @Override
+    public List<WalkContributionRecordRow> contributionRecords(
+            long userId,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            Long dogId
+    ) {
+        QueryParts filter = recordFilter(userId, from, to, dogId);
+        String sql = """
+                SELECT (session.ended_at AT TIME ZONE 'Asia/Seoul')::date AS walk_date,
+                       session.session_id, session.course_name, session.distance_m,
+                       session.started_at, session.track_geom IS NOT NULL AS has_route
+                FROM walk_session session
+                """ + filter.whereClause() + """
+                ORDER BY walk_date, session.started_at, session.session_id
+                """;
+        return jdbcTemplate.query(sql, (resultSet, rowNumber) -> new WalkContributionRecordRow(
+                resultSet.getObject("walk_date", java.time.LocalDate.class),
+                resultSet.getLong("session_id"),
+                resultSet.getString("course_name"),
+                resultSet.getBigDecimal("distance_m"),
+                resultSet.getObject("started_at", OffsetDateTime.class),
+                resultSet.getBoolean("has_route")
+        ), filter.args().toArray());
+    }
+
     private QueryParts recordFilter(long userId, OffsetDateTime from, OffsetDateTime to, Long dogId) {
         StringBuilder where = new StringBuilder("WHERE session.user_id = ? AND session.is_saved = true");
         List<Object> args = new ArrayList<>();

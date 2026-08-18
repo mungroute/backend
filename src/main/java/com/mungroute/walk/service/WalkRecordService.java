@@ -9,6 +9,9 @@ import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
 import com.mungroute.walk.dto.request.RenameWalkRequest;
 import com.mungroute.walk.dto.response.WalkDogSnapshotResponse;
+import com.mungroute.walk.dto.response.WalkContributionDayResponse;
+import com.mungroute.walk.dto.response.WalkContributionRecordResponse;
+import com.mungroute.walk.dto.response.WalkContributionsResponse;
 import com.mungroute.walk.dto.response.WalkFavoriteCourseResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.dto.response.WalkRecordSummaryResponse;
@@ -27,8 +30,11 @@ import java.util.List;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
+import java.time.Year;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
 
 @Service
 public class WalkRecordService {
@@ -147,6 +153,32 @@ public class WalkRecordService {
                 aggregate.totalDurationSec(), scale(aggregate.averageDistanceM(), 1),
                 aggregate.averageDurationSec(), weekdays, favorite
         );
+    }
+
+    @Transactional(readOnly = true)
+    public WalkContributionsResponse contributions(long userId, Year year, Long dogId) {
+        ZoneId zone = ZoneId.of("Asia/Seoul");
+        OffsetDateTime from = year.atDay(1).atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime to = year.plusYears(1).atDay(1).atStartOfDay(zone).toOffsetDateTime();
+        var grouped = new LinkedHashMap<LocalDate, List<com.mungroute.walk.repository.WalkContributionRecordRow>>();
+        queryRepository.contributionRecords(userId, from, to, dogId)
+                .forEach(row -> grouped.computeIfAbsent(row.date(), ignored -> new java.util.ArrayList<>()).add(row));
+
+        List<WalkContributionDayResponse> days = grouped.entrySet().stream()
+                .map(entry -> {
+                    BigDecimal totalDistance = entry.getValue().stream()
+                            .map(row -> row.distanceM() == null ? BigDecimal.ZERO : row.distanceM())
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    List<WalkContributionRecordResponse> records = entry.getValue().stream()
+                            .map(row -> new WalkContributionRecordResponse(
+                                    row.sessionId(), row.courseName(), scale(row.distanceM(), 1),
+                                    row.startedAt(), row.hasRoute()))
+                            .toList();
+                    return new WalkContributionDayResponse(
+                            entry.getKey(), scale(totalDistance, 1), records.size(), records);
+                })
+                .toList();
+        return new WalkContributionsResponse(year.getValue(), dogId, days);
     }
 
     private WalkSession ownedForUpdate(long userId, long sessionId) {
