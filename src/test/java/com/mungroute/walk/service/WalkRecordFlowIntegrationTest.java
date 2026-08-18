@@ -3,8 +3,10 @@ package com.mungroute.walk.service;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
 import com.mungroute.walk.dto.request.StartWalkRequest;
+import com.mungroute.walk.dto.request.RenameWalkRequest;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.exception.WalkErrorCode;
+import com.mungroute.proximity.repository.PresenceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,7 +15,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.UUID;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,6 +38,9 @@ class WalkRecordFlowIntegrationTest {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    PresenceRepository presenceRepository;
 
     @Test
     void finalizationExcludesAccumulatedAndOpenPauseTime() {
@@ -107,6 +115,81 @@ class WalkRecordFlowIntegrationTest {
     }
 
     @Test
+    void filtersByDogRenamesAndAggregatesMonthlyStatistics() {
+        long userId = insertUser();
+        long dogId = jdbcTemplate.queryForObject("""
+                INSERT INTO dog_profile(user_id, name, breed, birth_date, is_default)
+                VALUES (?, '망고', '골든 리트리버', CURRENT_DATE - interval '4 years', true)
+                RETURNING dog_id
+                """, Long.class, userId);
+        long sessionId = insertEndedSession(userId, "MATCHED", true, "{101,102}");
+        recordService.save(userId, sessionId, new SaveWalkRequest("점심 산책", false));
+        jdbcTemplate.update("""
+                INSERT INTO walk_session_dog(session_id, dog_id, dog_name, breed)
+                VALUES (?, ?, '망고', '골든 리트리버')
+                """, sessionId, dogId);
+
+        var renamed = recordService.rename(
+                userId, sessionId, new RenameWalkRequest("망고의 점심 산책"));
+        var now = OffsetDateTime.now(ZoneId.of("Asia/Seoul"));
+        var filtered = recordService.list(
+                userId, 0, 20, now.minusDays(1), now.plusDays(1), dogId);
+        var statistics = recordService.statistics(
+                userId, YearMonth.from(now), dogId);
+
+        assertThat(renamed.courseName()).isEqualTo("망고의 점심 산책");
+        assertThat(renamed.dogs()).extracting("name").containsExactly("망고");
+        assertThat(filtered).hasSize(1);
+        assertThat(filtered.getFirst().dogNames()).containsExactly("망고");
+        assertThat(filtered.getFirst().routePreviewGeoJson()).isNotNull();
+        assertThat(statistics.walkCount()).isOne();
+        assertThat(statistics.totalDistanceM()).isEqualByComparingTo("1800.0");
+        assertThat(statistics.favoriteCourse().courseName()).isEqualTo("망고의 점심 산책");
+        assertThat(statistics.weekdayDistances()).hasSize(1);
+    }
+
+    @Test
+    void storesAnonymousProximityNotificationsAndExposesTheirCountInTheWalkRecord() {
+        long recipientUserId = insertUser();
+        long otherUserId = insertUser();
+        long recipientSessionId = insertEndedSession(recipientUserId, "MATCHED", true, "{101}");
+        long otherSessionId = insertEndedSession(otherUserId, "MATCHED", true, "{102}");
+        recordService.save(
+                recipientUserId,
+                recipientSessionId,
+                new SaveWalkRequest("거리두기 기록 산책", false)
+        );
+        OffsetDateTime firstAt = OffsetDateTime.now();
+
+        presenceRepository.recordProximityNotification(
+                recipientSessionId, otherSessionId, "BAND_100_500", 2, 45, "NEW", firstAt);
+        presenceRepository.recordProximityNotification(
+                recipientSessionId, otherSessionId, "BAND_30_50", 2, 45, "APPROACHING", firstAt.plusSeconds(4));
+        presenceRepository.endProximityEvents(
+                recipientSessionId, List.of(otherSessionId), firstAt.plusSeconds(8));
+        presenceRepository.recordProximityNotification(
+                recipientSessionId, otherSessionId, "VERY_CLOSE", null, null, "NEW", firstAt.plusSeconds(12));
+
+        var detail = recordService.detail(recipientUserId, recipientSessionId);
+        var rows = jdbcTemplate.queryForList("""
+                SELECT distance_band, bearing_octant, bearing_spread, trend,
+                       notify_count, active, ended_at
+                FROM proximity_event
+                WHERE recipient_session_id = ?
+                ORDER BY proximity_event_id
+                """, recipientSessionId);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.getFirst().get("notify_count")).isEqualTo(2);
+        assertThat(rows.getFirst().get("active")).isEqualTo(false);
+        assertThat(rows.getFirst().get("ended_at")).isNotNull();
+        assertThat(rows.getLast().get("distance_band")).isEqualTo("VERY_CLOSE");
+        assertThat(rows.getLast().get("bearing_octant")).isNull();
+        assertThat(rows.getLast().get("bearing_spread")).isNull();
+        assertThat(detail.distanceAlertCount()).isEqualTo(3);
+    }
+
+    @Test
     void resumesAnEmptyActiveSessionWhenStartingAgain() {
         long userId = insertUser();
         long orphanedSessionId = jdbcTemplate.queryForObject("""
@@ -154,8 +237,8 @@ class WalkRecordFlowIntegrationTest {
     void resumesAPausedActiveSessionBeforeReturningIt() {
         long userId = insertUser();
         long sessionId = jdbcTemplate.queryForObject("""
-                INSERT INTO walk_session(user_id, started_at, paused_at, mode)
-                VALUES (?, now() - interval '5 minutes', now() - interval '1 minute', 'distance')
+                INSERT INTO walk_session(user_id, started_at, paused_at, mode, locked_mode)
+                VALUES (?, now() - interval '5 minutes', now() - interval '1 minute', 'distance', 'distance')
                 RETURNING session_id
                 """, Long.class, userId);
 

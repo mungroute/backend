@@ -5,6 +5,9 @@ import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 @Repository
 public class JdbcPresenceRepository implements PresenceRepository{
@@ -117,11 +120,83 @@ public class JdbcPresenceRepository implements PresenceRepository{
 
     @Override
     public int deleteBySessionId(long sessionId) {
+        OffsetDateTime endedAt = OffsetDateTime.now();
+        endAllProximityEvents(sessionId, endedAt);
         return jdbcTemplate.update("""
                 DELETE FROM active_presence
                 WHERE session_id = ?
                 """,
                 sessionId
         );
+    }
+
+    @Override
+    public int recordProximityNotification(
+            long recipientSessionId,
+            long otherSessionId,
+            String distanceBand,
+            Integer bearingOctant,
+            Integer bearingSpread,
+            String trend,
+            OffsetDateTime notifiedAt
+    ) {
+        return jdbcTemplate.update("""
+                INSERT INTO proximity_event(
+                    recipient_session_id, other_session_id, distance_band,
+                    bearing_octant, bearing_spread, trend,
+                    first_detected_at, last_notified_at, notify_count, active, ended_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, true, NULL)
+                ON CONFLICT (recipient_session_id, other_session_id) WHERE active = true
+                DO UPDATE SET
+                    distance_band = EXCLUDED.distance_band,
+                    bearing_octant = EXCLUDED.bearing_octant,
+                    bearing_spread = EXCLUDED.bearing_spread,
+                    trend = EXCLUDED.trend,
+                    last_notified_at = EXCLUDED.last_notified_at,
+                    notify_count = LEAST(proximity_event.notify_count + 1, 5)
+                """,
+                recipientSessionId,
+                otherSessionId,
+                distanceBand,
+                bearingOctant,
+                bearingSpread,
+                trend,
+                notifiedAt,
+                notifiedAt
+        );
+    }
+
+    @Override
+    public int endProximityEvents(
+            long recipientSessionId,
+            List<Long> otherSessionIds,
+            OffsetDateTime endedAt
+    ) {
+        if (otherSessionIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = String.join(",", Collections.nCopies(otherSessionIds.size(), "?"));
+        String sql = """
+                UPDATE proximity_event
+                SET active = false, ended_at = ?
+                WHERE recipient_session_id = ?
+                  AND active = true
+                  AND other_session_id IN (%s)
+                """.formatted(placeholders);
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(endedAt);
+        arguments.add(recipientSessionId);
+        arguments.addAll(otherSessionIds);
+        return jdbcTemplate.update(sql, arguments.toArray());
+    }
+
+    @Override
+    public int endAllProximityEvents(long sessionId, OffsetDateTime endedAt) {
+        return jdbcTemplate.update("""
+                UPDATE proximity_event
+                SET active = false, ended_at = ?
+                WHERE active = true
+                  AND (recipient_session_id = ? OR other_session_id = ?)
+                """, endedAt, sessionId, sessionId);
     }
 }

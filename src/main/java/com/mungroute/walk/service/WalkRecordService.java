@@ -7,8 +7,13 @@ import com.mungroute.global.exception.BusinessException;
 import com.mungroute.walk.domain.WalkMatchStatus;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
+import com.mungroute.walk.dto.request.RenameWalkRequest;
+import com.mungroute.walk.dto.response.WalkDogSnapshotResponse;
+import com.mungroute.walk.dto.response.WalkFavoriteCourseResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
 import com.mungroute.walk.dto.response.WalkRecordSummaryResponse;
+import com.mungroute.walk.dto.response.WalkStatisticsResponse;
+import com.mungroute.walk.dto.response.WalkWeekdayDistanceResponse;
 import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.WalkRecordDetailRow;
 import com.mungroute.walk.repository.WalkRecordQueryRepository;
@@ -19,6 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.OffsetDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 
 @Service
 public class WalkRecordService {
@@ -73,7 +83,19 @@ public class WalkRecordService {
 
     @Transactional(readOnly = true)
     public List<WalkRecordSummaryResponse> list(long userId, int page, int size) {
-        return queryRepository.findSavedByUser(userId, page, size).stream()
+        return list(userId, page, size, null, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WalkRecordSummaryResponse> list(
+            long userId,
+            int page,
+            int size,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            Long dogId
+    ) {
+        return queryRepository.findSavedByUser(userId, page, size, from, to, dogId).stream()
                 .map(this::toSummaryResponse)
                 .toList();
     }
@@ -93,6 +115,38 @@ public class WalkRecordService {
         }
         walkSessionRepository.delete(session);
         walkSessionRepository.flush();
+    }
+
+    @Transactional
+    public WalkRecordDetailResponse rename(long userId, long sessionId, RenameWalkRequest request) {
+        WalkSession session = ownedForUpdate(userId, sessionId);
+        if (!session.isSaved()) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_NOT_SAVED);
+        }
+        if (walkSessionRepository.renameSavedWalk(userId, sessionId, request.courseName().trim()) != 1) {
+            throw new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND);
+        }
+        return detail(userId, sessionId);
+    }
+
+    @Transactional(readOnly = true)
+    public WalkStatisticsResponse statistics(long userId, YearMonth month, Long dogId) {
+        ZoneId zone = ZoneId.of("Asia/Seoul");
+        OffsetDateTime from = month.atDay(1).atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime to = month.plusMonths(1).atDay(1).atStartOfDay(zone).toOffsetDateTime();
+        var aggregate = queryRepository.statistics(userId, from, to, dogId);
+        var weekdays = queryRepository.weekdayDistances(userId, from, to, dogId).stream()
+                .map(row -> new WalkWeekdayDistanceResponse(row.dayOfWeek(), scale(row.distanceM(), 1)))
+                .toList();
+        WalkFavoriteCourseResponse favorite = queryRepository.favoriteCourse(userId, from, to, dogId)
+                .map(row -> new WalkFavoriteCourseResponse(
+                        row.courseName(), row.walkCount(), row.averageDurationSec()))
+                .orElse(null);
+        return new WalkStatisticsResponse(
+                month.toString(), dogId, aggregate.walkCount(), scale(aggregate.totalDistanceM(), 1),
+                aggregate.totalDurationSec(), scale(aggregate.averageDistanceM(), 1),
+                aggregate.averageDurationSec(), weekdays, favorite
+        );
     }
 
     private WalkSession ownedForUpdate(long userId, long sessionId) {
@@ -123,7 +177,11 @@ public class WalkRecordService {
                 row.durationSec(),
                 row.representative(),
                 row.loop(),
-                WalkMatchStatus.valueOf(row.matchStatus())
+                WalkMatchStatus.valueOf(row.matchStatus()),
+                parseDogNames(row.dogNamesJson()),
+                row.distanceAlertCount(),
+                averageSpeed(row.distanceM(), row.durationSec()),
+                parseGeoJson(row.routePreviewGeoJson())
         );
     }
 
@@ -142,8 +200,28 @@ public class WalkRecordService {
                 parseSegmentIds(row.matchedSegmentIdsCsv()),
                 row.pointCount(),
                 row.usablePointCount(),
-                parseGeoJson(row.trackGeoJson())
+                parseGeoJson(row.trackGeoJson()),
+                parseDogs(row.dogSnapshotsJson()),
+                row.distanceAlertCount(),
+                averageSpeed(row.distanceM(), row.durationSec())
         );
+    }
+
+    private List<String> parseDogNames(String json) {
+        JsonNode root = parseJson(json);
+        if (root == null || !root.isArray()) return List.of();
+        java.util.ArrayList<String> names = new java.util.ArrayList<>();
+        root.forEach(node -> names.add(node.asText()));
+        return List.copyOf(names);
+    }
+
+    private List<WalkDogSnapshotResponse> parseDogs(String json) {
+        JsonNode root = parseJson(json);
+        if (root == null || !root.isArray()) return List.of();
+        java.util.ArrayList<WalkDogSnapshotResponse> dogs = new java.util.ArrayList<>();
+        root.forEach(node -> dogs.add(new WalkDogSnapshotResponse(
+                node.get("dogId").asLong(), node.get("name").asText(), node.get("breed").asText())));
+        return List.copyOf(dogs);
     }
 
     private List<Long> parseSegmentIds(String csv) {
@@ -165,5 +243,24 @@ public class WalkRecordService {
         } catch (JacksonException exception) {
             throw new IllegalStateException("DB의 산책 GeoJSON을 해석할 수 없습니다.", exception);
         }
+    }
+
+    private JsonNode parseJson(String json) {
+        if (json == null) return null;
+        try {
+            return objectMapper.readTree(json);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("DB의 산책 부가 정보를 해석할 수 없습니다.", exception);
+        }
+    }
+
+    private BigDecimal averageSpeed(BigDecimal distanceM, Integer durationSec) {
+        if (distanceM == null || durationSec == null || durationSec <= 0) return BigDecimal.ZERO.setScale(1);
+        return distanceM.multiply(BigDecimal.valueOf(3.6))
+                .divide(BigDecimal.valueOf(durationSec), 1, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal scale(BigDecimal value, int scale) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(scale, RoundingMode.HALF_UP);
     }
 }

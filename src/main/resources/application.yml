@@ -28,6 +28,8 @@ security:
     reset-token-ttl: 10m
     # 메일 연동 전 로컬 데모에서만 응답에 인증번호를 포함한다.
     expose-code: ${PASSWORD_RESET_EXPOSE_CODE:false}
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 
 springdoc:
   swagger-ui:

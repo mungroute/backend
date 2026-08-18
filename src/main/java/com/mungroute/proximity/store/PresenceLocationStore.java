@@ -21,6 +21,11 @@ public interface PresenceLocationStore {
             double distanceMeters
     );
 
+    NearbyPresenceTransition synchronizeNearbySessions(
+            long sessionId,
+            List<Long> nearbySessionIds
+    );
+
     String issueMeetCandidateRef(long viewerSessionId, long targetSessionId, long targetUserId);
 
     Optional<MeetCandidateTarget> resolveMeetCandidateRef(long viewerSessionId, String candidateRef);

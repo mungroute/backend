@@ -176,6 +176,20 @@ public interface WalkSessionRepository extends JpaRepository<WalkSession, Long> 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """
             UPDATE walk_session
+            SET course_name = :courseName
+            WHERE session_id = :sessionId
+              AND user_id = :userId
+              AND is_saved = true
+            """, nativeQuery = true)
+    int renameSavedWalk(
+            @Param("userId") Long userId,
+            @Param("sessionId") Long sessionId,
+            @Param("courseName") String courseName
+    );
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE walk_session
             SET is_representative = false
             WHERE user_id = :userId
               AND is_representative = true

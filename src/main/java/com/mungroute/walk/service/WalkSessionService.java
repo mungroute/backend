@@ -206,6 +206,7 @@ public class WalkSessionService {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
         }
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
+        presenceRepository.endAllProximityEvents(sessionId, changedAt);
         presenceLocationStore.delete(sessionId);
         meetService.closeForSession(userId, sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);

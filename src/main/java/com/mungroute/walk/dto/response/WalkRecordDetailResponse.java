@@ -21,6 +21,9 @@ public record WalkRecordDetailResponse(
         List<Long> matchedSegmentIds,
         Long pointCount,
         Long usablePointCount,
-        JsonNode trackGeoJson
+        JsonNode trackGeoJson,
+        List<WalkDogSnapshotResponse> dogs,
+        long distanceAlertCount,
+        BigDecimal averageSpeedKmh
 ) {
 }

@@ -1,0 +1,102 @@
+name: Backend CI/CD
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Test and build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgrouting/pgrouting:16-3.5-3.8
+        env:
+          POSTGRES_DB: ${{ vars.CI_DB_NAME }}
+          POSTGRES_USER: ${{ vars.CI_DB_USERNAME }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ vars.CI_DB_USERNAME }} -d ${{ vars.CI_DB_NAME }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      SPRING_PROFILES_ACTIVE: ${{ vars.CI_SPRING_PROFILES_ACTIVE }}
+      DB_URL: ${{ vars.CI_DB_URL }}
+      DB_USERNAME: ${{ vars.CI_DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+      REDIS_URL: ${{ vars.CI_REDIS_URL }}
+      JWT_SECRET: ${{ secrets.CI_JWT_SECRET }}
+      JWT_COOKIE_SECURE: ${{ vars.CI_JWT_COOKIE_SECURE }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Run tests and build executable jar
+        run: ./gradlew clean test bootJar --no-daemon
+
+      - name: Verify production Docker image
+        run: docker build --tag mungroute-backend:${{ github.sha }} .
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.run_id }}
+          path: build/reports/tests/test/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Render
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL repository secret is not configured." >&2
+            exit 1
+          fi
+          curl --fail-with-body --retry 3 --request POST "$RENDER_DEPLOY_HOOK_URL"

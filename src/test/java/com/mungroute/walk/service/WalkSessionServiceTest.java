@@ -152,6 +152,34 @@ class WalkSessionServiceTest {
     }
 
     @Test
+    void pauseClosesActiveProximityEventsAndRemovesRealtimePresence() {
+        long userId = 1L;
+        long sessionId = 27L;
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(userId);
+        when(session.isActive()).thenReturn(true);
+
+        var response = walkSessionService.pauseWalk(userId, sessionId);
+
+        assertThat(response.sessionId()).isEqualTo(sessionId);
+        assertThat(response.status()).isEqualTo("PAUSED");
+        verify(walkSessionRepository).pauseWalkSession(
+                org.mockito.ArgumentMatchers.eq(sessionId),
+                any(OffsetDateTime.class)
+        );
+        verify(presenceRepository).endAllProximityEvents(
+                org.mockito.ArgumentMatchers.eq(sessionId),
+                any(OffsetDateTime.class)
+        );
+        verify(presenceLocationStore).delete(sessionId);
+        verify(meetService).closeForSession(userId, sessionId);
+    }
+
+    @Test
     void changeModeRejectsSwitchingToTheOppositeMode() {
         long userId = 1L;
         long sessionId = 27L;
