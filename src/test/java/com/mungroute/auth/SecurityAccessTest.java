@@ -91,6 +91,13 @@ class SecurityAccessTest {
     }
 
     @Test
+    void prometheusEndpointPassesSecurityWithoutAuthentication() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
     void validJwtRestoresUserDetailsPrincipal() throws Exception {
         MungrouteUserPrincipal principal = new MungrouteUserPrincipal(
                 1L, "mango@example.com", "{bcrypt}hash", "망고보호자",

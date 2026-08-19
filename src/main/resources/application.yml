@@ -50,7 +50,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,flyway
+        include: health,info,flyway,prometheus,metrics
+
+  metrics:
+    distribution:
+      percentiles-histogram:
+        mungroute.websocket.message: true
+        mungroute.presence.stage: true
 
   endpoint:
     health:

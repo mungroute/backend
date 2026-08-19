@@ -39,4 +39,3 @@ for ($index = 0; $index -lt $source.Count; $index++) {
 $refreshed | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding utf8
 Write-Progress -Activity 'D17 presence fixture 갱신' -Completed
 Write-Host "Refreshed $($refreshed.Count) fixtures: $OutputPath"
-
