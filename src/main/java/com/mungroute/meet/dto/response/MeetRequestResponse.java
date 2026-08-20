@@ -9,6 +9,7 @@ public record MeetRequestResponse(
         String status,
         OffsetDateTime createdAt,
         OffsetDateTime expiresAt,
+        MeetProfilePreviewResponse preview,
         MeetProfileResponse profile
 ) {
 }

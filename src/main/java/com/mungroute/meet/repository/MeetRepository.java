@@ -6,7 +6,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface MeetRepository {
-    void upsertProfile(long userId, String dogName, String breed, Integer ageYears, String profileImageUrl, List<String> tags);
+    void upsertProfile(long userId, String dogName, String breed, Integer ageYears, String profileImageUrl,
+                       List<String> tags, String leashGreeting, String strangerResponse, String touchTolerance,
+                       String barkingLevel, String bitingLevel);
     Optional<MeetProfileRecord> findProfile(long userId);
     boolean isBlockedEither(long firstUserId, long secondUserId);
     void createRequest(UUID requestId, long requesterSessionId, long recipientSessionId, long requesterUserId, long recipientUserId, OffsetDateTime expiresAt);

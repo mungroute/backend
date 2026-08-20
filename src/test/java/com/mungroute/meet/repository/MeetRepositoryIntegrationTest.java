@@ -33,7 +33,9 @@ class MeetRepositoryIntegrationTest {
         WalkSession firstWalk = walkSessionRepository.save(WalkSession.start(first, WalkMode.MEET, OffsetDateTime.now()));
         WalkSession secondWalk = walkSessionRepository.save(WalkSession.start(second, WalkMode.MEET, OffsetDateTime.now()));
 
-        meetRepository.upsertProfile(first.getUserId(), "망고", "리트리버", 4, null, List.of("차분해요", "사람을 좋아해요"));
+        meetRepository.upsertProfile(first.getUserId(), "망고", "리트리버", 4, null,
+                List.of("차분해요", "사람을 좋아해요"),
+                "LIKES", "NEUTRAL", "COMFORTABLE", "RARE", "NONE");
         UUID requestId = UUID.randomUUID();
         meetRepository.createRequest(requestId, firstWalk.getSessionId(), secondWalk.getSessionId(),
                 first.getUserId(), second.getUserId(), OffsetDateTime.now().plusMinutes(2));
@@ -41,6 +43,7 @@ class MeetRepositoryIntegrationTest {
 
         assertThat(meetRepository.findProfile(first.getUserId()).orElseThrow().temperamentTags())
                 .containsExactly("차분해요", "사람을 좋아해요");
+        assertThat(meetRepository.findProfile(first.getUserId()).orElseThrow().leashGreeting()).isEqualTo("LIKES");
         assertThat(meetRepository.findRequest(requestId).orElseThrow().status()).isEqualTo("PENDING");
     }
 }

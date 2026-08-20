@@ -4,7 +4,9 @@ import com.mungroute.global.exception.BusinessException;
 import com.mungroute.meet.dto.response.MeetCandidateResponse;
 import com.mungroute.meet.dto.response.MeetConnectionResponse;
 import com.mungroute.meet.dto.response.MeetPresenceResponse;
+import com.mungroute.meet.dto.response.MeetProfilePreviewResponse;
 import com.mungroute.meet.dto.response.MeetProfileResponse;
+import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.exception.MeetErrorCode;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
@@ -66,9 +68,12 @@ public class MeetPresenceService {
                     .filter(candidate -> candidate.distance <= request.radiusM())
                     .sorted(Comparator.comparingDouble(CandidateWithDistance::distance))
                     .limit(3)
+                    .flatMap(candidate -> meetRepository.findProfile(candidate.location.userId()).stream()
+                            .map(profile -> new CandidateWithProfile(candidate, profile)))
                     .map(candidate -> new MeetCandidateResponse(
-                            locationStore.issueMeetCandidateRef(origin.sessionId(), candidate.location.sessionId(), candidate.location.userId()),
-                            distanceBand(candidate.distance), now.plusSeconds(30)
+                            locationStore.issueMeetCandidateRef(origin.sessionId(), candidate.candidate.location.sessionId(), candidate.candidate.location.userId()),
+                            distanceBand(candidate.candidate.distance), now.plusSeconds(30),
+                            MeetProfilePreviewResponse.from(candidate.profile)
                     )).toList()
                 : List.of();
 
@@ -128,4 +133,5 @@ public class MeetPresenceService {
     }
 
     private record CandidateWithDistance(com.mungroute.proximity.store.NearbyPresenceLocation location, double distance) {}
+    private record CandidateWithProfile(CandidateWithDistance candidate, MeetProfileRecord profile) {}
 }
