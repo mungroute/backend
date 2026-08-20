@@ -14,13 +14,21 @@ import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.WalkSessionRepository;
-import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.List;
+
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.CLASSIFICATION;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.DB_END_EVENTS;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.DB_NOTIFICATION;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.REDIS_DISTANCE_HISTORY;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.REDIS_GEO_SEARCH;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.REDIS_LOCATION_UPDATE;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.REDIS_SESSION_SYNC;
+import static com.mungroute.proximity.service.PresenceMetrics.Stage.SESSION_VALIDATION;
 
 @Service
 public class PresenceUpdateService {
@@ -31,22 +39,25 @@ public class PresenceUpdateService {
     private final WalkSessionRepository walkSessionRepository;
     private final PresenceRepository presenceRepository;
     private final PresenceLocationStore presenceLocationStore;
+    private final PresenceMetrics metrics;
 
     public PresenceUpdateService(
             WalkSessionRepository walkSessionRepository,
             PresenceRepository presenceRepository,
-            PresenceLocationStore presenceLocationStore
+            PresenceLocationStore presenceLocationStore,
+            PresenceMetrics metrics
     ) {
         this.walkSessionRepository = walkSessionRepository;
         this.presenceRepository = presenceRepository;
         this.presenceLocationStore = presenceLocationStore;
+        this.metrics = metrics;
     }
 
-    @Transactional
     public PresenceUpdateResponse update(long userId, PresenceUpdateRequest request) {
         validateTimestamp(request.measuredAt());
         OffsetDateTime updatedAt = OffsetDateTime.now();
-        String mode = validateColdOrCachedSession(userId, request, updatedAt);
+        String mode = metrics.record(SESSION_VALIDATION,
+                () -> validateColdOrCachedSession(userId, request, updatedAt));
 
         PresenceLocation origin = new PresenceLocation(
                 request.sessionId(),
@@ -59,32 +70,37 @@ public class PresenceUpdateService {
                 request.stationary(),
                 updatedAt
         );
-        presenceLocationStore.update(origin);
+        metrics.record(REDIS_LOCATION_UPDATE, () -> presenceLocationStore.update(origin));
 
-        List<ClassifiedPresence> classifiedNearby = presenceLocationStore.findNearby(
-                        origin,
-                        request.radiusM() + CANDIDATE_ACCURACY_BUFFER_METERS,
-                        REDIS_CANDIDATE_LIMIT
-                ).stream()
+        List<NearbyPresenceLocation> nearbyCandidates = metrics.record(REDIS_GEO_SEARCH,
+                () -> presenceLocationStore.findNearby(
+                    origin,
+                    request.radiusM() + CANDIDATE_ACCURACY_BUFFER_METERS,
+                    REDIS_CANDIDATE_LIMIT
+                ));
+        List<ClassifiedPresence> classifiedNearby = metrics.record(CLASSIFICATION, () -> nearbyCandidates.stream()
                 .filter(candidate -> candidate.userId() != userId)
                 .filter(candidate -> WalkMode.DISTANCE.getValue().equals(candidate.mode()))
                 .map(candidate -> classify(origin, candidate, request.radiusM()))
                 .filter(candidate -> candidate != null)
                 .sorted(Comparator.comparingInt(ClassifiedPresence::sortDistanceMeters))
                 .limit(RESPONSE_LIMIT)
-                .map(candidate -> candidate.withTrend(presenceLocationStore.appendDistanceHistory(
-                        origin.sessionId(),
-                        candidate.otherSessionId(),
-                        candidate.distanceMeters()
-                )))
+                .toList());
+        classifiedNearby = classifiedNearby.stream()
+                .map(candidate -> candidate.withTrend(metrics.record(REDIS_DISTANCE_HISTORY,
+                        () -> presenceLocationStore.appendDistanceHistory(
+                                origin.sessionId(), candidate.otherSessionId(), candidate.distanceMeters()
+                        ))))
                 .toList();
 
-        var transition = presenceLocationStore.synchronizeNearbySessions(
-                origin.sessionId(),
-                classifiedNearby.stream().map(ClassifiedPresence::otherSessionId).toList()
-        );
-        presenceRepository.endProximityEvents(
-                origin.sessionId(), transition.leftSessionIds(), updatedAt);
+        List<ClassifiedPresence> finalClassifiedNearby = classifiedNearby;
+        var transition = metrics.record(REDIS_SESSION_SYNC,
+                () -> presenceLocationStore.synchronizeNearbySessions(
+                        origin.sessionId(),
+                        finalClassifiedNearby.stream().map(ClassifiedPresence::otherSessionId).toList()
+                ));
+        metrics.record(DB_END_EVENTS, () -> presenceRepository.endProximityEvents(
+                origin.sessionId(), transition.leftSessionIds(), updatedAt));
         for (long enteredSessionId : transition.enteredSessionIds()) {
             classifiedNearby.stream()
                     .filter(candidate -> candidate.otherSessionId() == enteredSessionId)
@@ -100,7 +116,8 @@ public class PresenceUpdateService {
                 request.sessionId(),
                 updatedAt,
                 request.stationary() ? 10 : 4,
-                nearby
+                nearby,
+                request.clientMessageId()
         );
     }
 
@@ -110,15 +127,15 @@ public class PresenceUpdateService {
             OffsetDateTime notifiedAt
     ) {
         NearbyPresenceResponse response = candidate.response();
-        presenceRepository.recordProximityNotification(
-                recipientSessionId,
-                candidate.otherSessionId(),
-                response.distanceBand(),
-                response.directionOctant(),
-                response.directionSpread(),
-                response.trend(),
-                notifiedAt
-        );
+        metrics.record(DB_NOTIFICATION, () -> presenceRepository.recordProximityNotification(
+                    recipientSessionId,
+                    candidate.otherSessionId(),
+                    response.distanceBand(),
+                    response.directionOctant(),
+                    response.directionSpread(),
+                    response.trend(),
+                    notifiedAt
+                ));
     }
 
     private String validateColdOrCachedSession(
@@ -138,7 +155,7 @@ public class PresenceUpdateService {
             return state.mode();
         }
 
-        WalkSession session = walkSessionRepository.findByIdForUpdate(request.sessionId())
+        WalkSession session = walkSessionRepository.findById(request.sessionId())
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateSession(session, userId);
         if (!presenceRepository.hasConsent(request.sessionId())) {
@@ -154,6 +171,9 @@ public class PresenceUpdateService {
         if (updated != 1) {
             throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
         }
+        presenceLocationStore.cacheSession(new PresenceSessionState(
+                request.sessionId(), userId, session.getMode().getValue()
+        ));
         return session.getMode().getValue();
     }
 

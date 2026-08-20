@@ -7,6 +7,15 @@ public record PresenceUpdateResponse(
         long sessionId,
         OffsetDateTime updatedAt,
         int nextUpdateAfterSeconds,
-        List<NearbyPresenceResponse> nearby
+        List<NearbyPresenceResponse> nearby,
+        String clientMessageId
 ) {
+    public PresenceUpdateResponse(
+            long sessionId,
+            OffsetDateTime updatedAt,
+            int nextUpdateAfterSeconds,
+            List<NearbyPresenceResponse> nearby
+    ) {
+        this(sessionId, updatedAt, nextUpdateAfterSeconds, nearby, null);
+    }
 }

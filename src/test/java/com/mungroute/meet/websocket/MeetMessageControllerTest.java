@@ -5,6 +5,8 @@ import com.mungroute.auth.security.UserPrincipalJwtAuthenticationToken;
 import com.mungroute.meet.dto.response.MeetPresenceResponse;
 import com.mungroute.meet.service.MeetPresenceService;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
+import com.mungroute.proximity.websocket.WebSocketMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -23,7 +25,8 @@ class MeetMessageControllerTest {
     @Test
     void delegatesStompPresenceWithAuthenticatedUser() {
         MeetPresenceService service = mock(MeetPresenceService.class);
-        MeetMessageController controller = new MeetMessageController(service);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        MeetMessageController controller = new MeetMessageController(service, new WebSocketMetrics(registry));
         MungrouteUserPrincipal user = new MungrouteUserPrincipal(7L, "meet@example.com", "password", "meet",
                 List.of(new SimpleGrantedAuthority("ROLE_USER")));
         Jwt jwt = Jwt.withTokenValue("token").header("alg", "HS256").subject("7")
@@ -35,6 +38,9 @@ class MeetMessageControllerTest {
         when(service.update(7L, request)).thenReturn(expected);
 
         assertThat(controller.update(request, authentication)).isSameAs(expected);
+        assertThat(registry.get("mungroute.websocket.message")
+                .tags("destination", "meet_presence", "result", "success")
+                .timer().count()).isEqualTo(1);
         verify(service).update(7L, request);
     }
 }

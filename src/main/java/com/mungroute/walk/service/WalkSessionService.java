@@ -82,9 +82,16 @@ public class WalkSessionService {
         // Starting a walk is idempotent for a user. A browser refresh or a server
         // restart must recover the active session instead of trapping the user in
         // ACTIVE_WALK_ALREADY_EXISTS conflicts.
+        WalkMode requestedMode = WalkMode.from(request.mode());
         var activeSession = walkSessionRepository.findActiveByUserIdForUpdate(userId);
         if (activeSession.isPresent()) {
             WalkSession session = activeSession.get();
+            if (requestedMode != WalkMode.OFF) {
+                if (session.getLockedMode() != null && session.getLockedMode() != requestedMode) {
+                    throw new BusinessException(WalkErrorCode.WALK_MODE_CHANGE_NOT_ALLOWED);
+                }
+                session.enablePresenceMode(requestedMode);
+            }
             if (session.isPaused()) {
                 walkSessionRepository.resumeWalkSession(session.getSessionId(), OffsetDateTime.now());
             }
@@ -94,11 +101,9 @@ public class WalkSessionService {
             return StartWalkResponse.from(session);
         }
 
-        WalkMode mode = WalkMode.from(request.mode());
-
         WalkSession walkSession = WalkSession.start(
                 user,
-                mode,
+                requestedMode,
                 OffsetDateTime.now()
         );
 

@@ -18,13 +18,16 @@ public class PresenceStompAuthInterceptor implements ChannelInterceptor {
 
     private final JwtDecoder jwtDecoder;
     private final JwtUserAuthenticationConverter authenticationConverter;
+    private final WebSocketMetrics metrics;
 
     public PresenceStompAuthInterceptor(
             JwtDecoder jwtDecoder,
-            JwtUserAuthenticationConverter authenticationConverter
+            JwtUserAuthenticationConverter authenticationConverter,
+            WebSocketMetrics metrics
     ) {
         this.jwtDecoder = jwtDecoder;
         this.authenticationConverter = authenticationConverter;
+        this.metrics = metrics;
     }
 
     @Override
@@ -34,25 +37,30 @@ public class PresenceStompAuthInterceptor implements ChannelInterceptor {
             return message;
         }
 
-        String authorization = accessor.getFirstNativeHeader("Authorization");
-        if (authorization == null) {
-            authorization = accessor.getFirstNativeHeader("authorization");
-        }
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
-            throw new BadCredentialsException("WebSocket access token is required");
-        }
+        try {
+            String authorization = accessor.getFirstNativeHeader("Authorization");
+            if (authorization == null) {
+                authorization = accessor.getFirstNativeHeader("authorization");
+            }
+            if (authorization == null || !authorization.startsWith("Bearer ")) {
+                throw new BadCredentialsException("WebSocket access token is required");
+            }
 
-        String rawToken = authorization.substring(7).trim();
-        if (rawToken.isEmpty()) {
-            throw new BadCredentialsException("WebSocket access token is required");
-        }
+            String rawToken = authorization.substring(7).trim();
+            if (rawToken.isEmpty()) {
+                throw new BadCredentialsException("WebSocket access token is required");
+            }
 
-        Jwt jwt = jwtDecoder.decode(rawToken);
-        Authentication authentication = authenticationConverter.convert(jwt);
-        if (authentication == null || !authentication.isAuthenticated()) {
-            throw new BadCredentialsException("WebSocket access token is invalid");
+            Jwt jwt = jwtDecoder.decode(rawToken);
+            Authentication authentication = authenticationConverter.convert(jwt);
+            if (authentication == null || !authentication.isAuthenticated()) {
+                throw new BadCredentialsException("WebSocket access token is invalid");
+            }
+            accessor.setUser(authentication);
+            return message;
+        } catch (RuntimeException exception) {
+            metrics.recordError("authentication");
+            throw exception;
         }
-        accessor.setUser(authentication);
-        return message;
     }
 }

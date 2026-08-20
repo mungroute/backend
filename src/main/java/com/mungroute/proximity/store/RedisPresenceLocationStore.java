@@ -6,6 +6,7 @@ import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -22,14 +23,41 @@ import java.util.UUID;
 @Component
 public class RedisPresenceLocationStore implements PresenceLocationStore {
 
+    private static final DefaultRedisScript<Long> UPDATE_LOCATION_SCRIPT = new DefaultRedisScript<>("""
+            redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
+            redis.call('HSET', KEYS[2], ARGV[3], ARGV[4])
+            redis.call('ZADD', KEYS[3], ARGV[5], ARGV[3])
+            return 1
+            """, Long.class);
+    private static final DefaultRedisScript<String> APPEND_HISTORY_SCRIPT = new DefaultRedisScript<>("""
+            local stored = redis.call('HGET', KEYS[1], ARGV[1])
+            local values = {}
+            if stored and stored ~= '' then
+                for value in string.gmatch(stored, '[^,]+') do
+                    table.insert(values, value)
+                end
+            end
+            while #values >= 3 do
+                table.remove(values, 1)
+            end
+            table.insert(values, ARGV[2])
+            local updated = table.concat(values, ',')
+            redis.call('HSET', KEYS[1], ARGV[1], updated)
+            redis.call('EXPIRE', KEYS[1], ARGV[3])
+            return updated
+            """, String.class);
+
     static final String GEO_KEY = "presence:geo";
     static final String SESSION_KEY_PREFIX = "presence:session:";
+    static final String METADATA_KEY = "presence:metadata";
+    static final String AUTH_SESSION_KEY_PREFIX = "presence:auth-session:";
     static final String HISTORY_KEY_PREFIX = "presence:history:";
     static final String NEARBY_KEY_PREFIX = "presence:nearby:";
     static final String EXPIRY_KEY = "presence:expiry";
     static final String MEET_CANDIDATE_KEY_PREFIX = "meet:candidate:";
     static final String MEET_CANDIDATE_PAIR_KEY_PREFIX = "meet:candidate-pair:";
     private static final Duration LOCATION_TTL = Duration.ofSeconds(30);
+    private static final Duration SESSION_CACHE_TTL = Duration.ofMinutes(30);
     private static final Duration HISTORY_TTL = Duration.ofSeconds(60);
     private static final Duration NEARBY_TTL = Duration.ofSeconds(30);
 
@@ -44,7 +72,6 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     public void update(PresenceLocation location) {
         cleanupExpiredMembers();
         String member = Long.toString(location.sessionId());
-        String key = SESSION_KEY_PREFIX + member;
         Map<String, String> metadata = new HashMap<>();
         metadata.put("userId", Long.toString(location.userId()));
         metadata.put("mode", location.mode());
@@ -55,24 +82,21 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
             metadata.put("heading", Double.toString(location.headingDegrees()));
         }
 
-        redisTemplate.opsForGeo().add(
-                GEO_KEY,
-                new Point(location.longitude(), location.latitude()),
-                member
-        );
-        redisTemplate.opsForHash().putAll(key, metadata);
-        redisTemplate.expire(key, LOCATION_TTL);
-        redisTemplate.opsForZSet().add(
-                EXPIRY_KEY,
+        redisTemplate.execute(
+                UPDATE_LOCATION_SCRIPT,
+                List.of(GEO_KEY, METADATA_KEY, EXPIRY_KEY),
+                Double.toString(location.longitude()),
+                Double.toString(location.latitude()),
                 member,
-                System.currentTimeMillis() + LOCATION_TTL.toMillis()
+                encodeMetadata(metadata),
+                Long.toString(System.currentTimeMillis() + LOCATION_TTL.toMillis())
         );
     }
 
     @Override
     public Optional<PresenceSessionState> findSession(long sessionId) {
         Map<Object, Object> metadata = redisTemplate.opsForHash()
-                .entries(SESSION_KEY_PREFIX + sessionId);
+                .entries(AUTH_SESSION_KEY_PREFIX + sessionId);
         if (metadata.isEmpty()) {
             return Optional.empty();
         }
@@ -86,6 +110,16 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
             delete(sessionId);
             return Optional.empty();
         }
+    }
+
+    @Override
+    public void cacheSession(PresenceSessionState session) {
+        String key = AUTH_SESSION_KEY_PREFIX + session.sessionId();
+        redisTemplate.opsForHash().putAll(key, Map.of(
+                "userId", Long.toString(session.userId()),
+                "mode", session.mode()
+        ));
+        redisTemplate.expire(key, SESSION_CACHE_TTL);
     }
 
     @Override
@@ -109,36 +143,88 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
             return List.of();
         }
 
-        List<NearbyPresenceLocation> nearby = new ArrayList<>();
+        List<GeoCandidate> candidates = new ArrayList<>();
         for (var result : results) {
             var geoLocation = result.getContent();
             String member = geoLocation.getName();
             if (member.equals(Long.toString(origin.sessionId())) || geoLocation.getPoint() == null) {
                 continue;
             }
+            candidates.add(new GeoCandidate(member, geoLocation.getPoint()));
+        }
 
-            Map<Object, Object> metadata = redisTemplate.opsForHash()
-                    .entries(SESSION_KEY_PREFIX + member);
-            if (metadata.isEmpty()) {
-                // GEO members have no individual TTL. Remove entries whose metadata expired.
-                redisTemplate.opsForZSet().remove(GEO_KEY, member);
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        List<Object> metadataResults = redisTemplate.opsForHash().multiGet(
+                METADATA_KEY, candidates.stream().map(GeoCandidate::member).map(value -> (Object) value).toList());
+
+        List<NearbyPresenceLocation> nearby = new ArrayList<>();
+        List<String> invalidMembers = new ArrayList<>();
+        for (int index = 0; index < candidates.size(); index++) {
+            GeoCandidate candidate = candidates.get(index);
+            Object stored = index < metadataResults.size() ? metadataResults.get(index) : null;
+            if (stored == null) {
+                invalidMembers.add(candidate.member());
                 continue;
             }
 
             try {
+                StoredMetadata metadata = decodeMetadata(stored.toString());
                 nearby.add(new NearbyPresenceLocation(
-                        Long.parseLong(member),
-                        Long.parseLong(metadata.get("userId").toString()),
-                        metadata.get("mode").toString(),
-                        geoLocation.getPoint().getX(),
-                        geoLocation.getPoint().getY(),
-                        Double.parseDouble(metadata.get("accuracy").toString())
+                        Long.parseLong(candidate.member()),
+                        metadata.userId(),
+                        metadata.mode(),
+                        candidate.point().getX(),
+                        candidate.point().getY(),
+                        metadata.accuracy()
                 ));
             } catch (RuntimeException ignored) {
-                redisTemplate.opsForZSet().remove(GEO_KEY, member);
+                invalidMembers.add(candidate.member());
             }
         }
+        if (!invalidMembers.isEmpty()) {
+            // GEO members have no individual TTL. Remove entries whose metadata expired.
+            redisTemplate.opsForZSet().remove(GEO_KEY, invalidMembers.toArray());
+        }
         return nearby;
+    }
+
+    private String encodeMetadata(Map<String, String> metadata) {
+        return String.join("|",
+                metadata.get("userId"),
+                metadata.get("mode"),
+                metadata.get("accuracy"),
+                metadata.getOrDefault("heading", ""),
+                metadata.get("stationary"),
+                metadata.get("updatedAt"));
+    }
+
+    private StoredMetadata decodeMetadata(String value) {
+        String[] fields = value.split("\\|", -1);
+        if (fields.length != 6) {
+            throw new IllegalArgumentException("Invalid presence metadata");
+        }
+        return new StoredMetadata(
+                Long.parseLong(fields[0]),
+                fields[1],
+                Double.parseDouble(fields[2]),
+                fields[3].isEmpty() ? null : Double.parseDouble(fields[3]),
+                Boolean.parseBoolean(fields[4]),
+                OffsetDateTime.parse(fields[5]));
+    }
+
+    private record GeoCandidate(String member, Point point) {
+    }
+
+    private record StoredMetadata(
+            long userId,
+            String mode,
+            double accuracy,
+            Double heading,
+            boolean stationary,
+            OffsetDateTime updatedAt
+    ) {
     }
 
     @Override
@@ -149,28 +235,20 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     ) {
         String key = HISTORY_KEY_PREFIX + sessionId;
         String field = Long.toString(otherSessionId);
-        Object stored = redisTemplate.opsForHash().get(key, field);
-        List<Double> history = new ArrayList<>();
-        if (stored != null && !stored.toString().isBlank()) {
-            for (String value : stored.toString().split(",")) {
-                try {
-                    history.add(Double.parseDouble(value));
-                } catch (NumberFormatException ignored) {
-                    history.clear();
-                    break;
-                }
-            }
-        }
-        history.add(distanceMeters);
-        if (history.size() > 3) {
-            history = new ArrayList<>(history.subList(history.size() - 3, history.size()));
-        }
-        redisTemplate.opsForHash().put(
-                key,
+        String stored = redisTemplate.execute(
+                APPEND_HISTORY_SCRIPT,
+                List.of(key),
                 field,
-                history.stream().map(String::valueOf).reduce((left, right) -> left + "," + right).orElse("")
+                Double.toString(distanceMeters),
+                Long.toString(HISTORY_TTL.toSeconds())
         );
-        redisTemplate.expire(key, HISTORY_TTL);
+        if (stored == null || stored.isBlank()) {
+            return List.of(distanceMeters);
+        }
+        List<Double> history = new ArrayList<>();
+        for (String value : stored.split(",")) {
+            history.add(Double.parseDouble(value));
+        }
         return List.copyOf(history);
     }
 
@@ -247,25 +325,26 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
 
     @Override
     public Optional<PresenceLocation> findLocation(long sessionId) {
+        cleanupExpiredMembers();
         String member = Long.toString(sessionId);
-        Map<Object, Object> metadata = redisTemplate.opsForHash().entries(SESSION_KEY_PREFIX + member);
+        Object stored = redisTemplate.opsForHash().get(METADATA_KEY, member);
         List<Point> positions = redisTemplate.opsForGeo().position(GEO_KEY, member);
-        if (metadata.isEmpty() || positions == null || positions.isEmpty() || positions.getFirst() == null) {
+        if (stored == null || positions == null || positions.isEmpty() || positions.getFirst() == null) {
             return Optional.empty();
         }
         try {
             Point point = positions.getFirst();
-            Object heading = metadata.get("heading");
+            StoredMetadata metadata = decodeMetadata(stored.toString());
             return Optional.of(new PresenceLocation(
                     sessionId,
-                    Long.parseLong(metadata.get("userId").toString()),
-                    metadata.get("mode").toString(),
+                    metadata.userId(),
+                    metadata.mode(),
                     point.getX(),
                     point.getY(),
-                    Double.parseDouble(metadata.get("accuracy").toString()),
-                    heading == null ? null : Double.parseDouble(heading.toString()),
-                    Boolean.parseBoolean(metadata.get("stationary").toString()),
-                    OffsetDateTime.parse(metadata.get("updatedAt").toString())
+                    metadata.accuracy(),
+                    metadata.heading(),
+                    metadata.stationary(),
+                    metadata.updatedAt()
             ));
         } catch (RuntimeException exception) {
             return Optional.empty();
@@ -278,7 +357,9 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
 
         redisTemplate.opsForZSet().remove(GEO_KEY, member);
         redisTemplate.opsForZSet().remove(EXPIRY_KEY, member);
+        redisTemplate.opsForHash().delete(METADATA_KEY, member);
         redisTemplate.delete(List.of(
+                AUTH_SESSION_KEY_PREFIX + member,
                 SESSION_KEY_PREFIX + member,
                 HISTORY_KEY_PREFIX + member,
                 NEARBY_KEY_PREFIX + member
@@ -299,6 +380,7 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
         }
         redisTemplate.opsForZSet().remove(GEO_KEY, expired.toArray());
         redisTemplate.opsForZSet().remove(EXPIRY_KEY, expired.toArray());
+        redisTemplate.opsForHash().delete(METADATA_KEY, expired.toArray());
         redisTemplate.delete(expired.stream().map(member -> SESSION_KEY_PREFIX + member).toList());
     }
 }

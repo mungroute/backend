@@ -4,6 +4,7 @@ import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.meet.dto.response.MeetPresenceResponse;
 import com.mungroute.meet.service.MeetPresenceService;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
+import com.mungroute.proximity.websocket.WebSocketMetrics;
 import jakarta.validation.Valid;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -16,9 +17,11 @@ import java.security.Principal;
 @Controller
 public class MeetMessageController {
     private final MeetPresenceService meetPresenceService;
+    private final WebSocketMetrics metrics;
 
-    public MeetMessageController(MeetPresenceService meetPresenceService) {
+    public MeetMessageController(MeetPresenceService meetPresenceService, WebSocketMetrics metrics) {
         this.meetPresenceService = meetPresenceService;
+        this.metrics = metrics;
     }
 
     @MessageMapping("/meet/presence")
@@ -26,8 +29,9 @@ public class MeetMessageController {
     public MeetPresenceResponse update(@Valid @Payload PresenceUpdateRequest request, Principal principal) {
         if (!(principal instanceof Authentication authentication)
                 || !(authentication.getPrincipal() instanceof MungrouteUserPrincipal user)) {
+            metrics.recordError("authentication");
             throw new IllegalStateException("Authenticated WebSocket user is required");
         }
-        return meetPresenceService.update(user.userId(), request);
+        return metrics.recordMessage("meet_presence", () -> meetPresenceService.update(user.userId(), request));
     }
 }

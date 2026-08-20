@@ -5,6 +5,8 @@ import com.mungroute.proximity.dto.request.PresenceConsentRequest;
 import com.mungroute.proximity.dto.response.PresenceConsentResponse;
 import com.mungroute.proximity.exception.PresenceErrorCode;
 import com.mungroute.proximity.repository.PresenceRepository;
+import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.proximity.store.PresenceSessionState;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
@@ -18,10 +20,16 @@ import java.time.OffsetDateTime;
 public class PresenceConsentService {
     private final WalkSessionRepository walkSessionRepository;
     private final PresenceRepository presenceRepository;
+    private final PresenceLocationStore presenceLocationStore;
 
-    public PresenceConsentService(WalkSessionRepository walkSessionRepository, PresenceRepository presenceRepository) {
+    public PresenceConsentService(
+            WalkSessionRepository walkSessionRepository,
+            PresenceRepository presenceRepository,
+            PresenceLocationStore presenceLocationStore
+    ) {
         this.walkSessionRepository = walkSessionRepository;
         this.presenceRepository = presenceRepository;
+        this.presenceLocationStore = presenceLocationStore;
     }
 
     @Transactional
@@ -54,6 +62,10 @@ public class PresenceConsentService {
                     "위치정보 수집 동의 상태를 저장하지 못했습니다."
             );
         }
+
+        presenceLocationStore.cacheSession(new PresenceSessionState(
+                session.getSessionId(), userId, session.getMode().getValue()
+        ));
 
         return new PresenceConsentResponse(
                 session.getSessionId(),

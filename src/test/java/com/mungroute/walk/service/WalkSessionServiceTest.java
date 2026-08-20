@@ -96,6 +96,30 @@ class WalkSessionServiceTest {
     }
 
     @Test
+    void startAppliesDistanceModeToAnExistingOffSession() {
+        long userId = 1L;
+        AppUser user = AppUser.register(
+                "mango@example.com",
+                "mango",
+                "encoded-password",
+                "01012345678"
+        );
+        WalkSession activeSession = WalkSession.start(user, WalkMode.OFF, OffsetDateTime.now());
+
+        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
+                .thenReturn(Optional.of(activeSession));
+
+        var response = walkSessionService.startWalk(userId, new StartWalkRequest("distance"));
+
+        assertThat(response.mode()).isEqualTo("distance");
+        assertThat(response.lockedMode()).isEqualTo("distance");
+        assertThat(activeSession.getMode()).isEqualTo(WalkMode.DISTANCE);
+        assertThat(activeSession.getLockedMode()).isEqualTo(WalkMode.DISTANCE);
+        verify(walkSessionRepository, never()).save(any(WalkSession.class));
+    }
+
+    @Test
     void changeModeSynchronizesConsentedPresence() {
         long userId = 1L;
         long sessionId = 27L;

@@ -5,6 +5,7 @@ import com.mungroute.auth.security.UserPrincipalJwtAuthenticationToken;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
 import com.mungroute.proximity.dto.response.PresenceUpdateResponse;
 import com.mungroute.proximity.service.PresenceUpdateService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -24,7 +25,9 @@ class PresenceMessageControllerTest {
     @Test
     void delegatesPresenceUpdateUsingAuthenticatedUserId() {
         PresenceUpdateService service = mock(PresenceUpdateService.class);
-        PresenceMessageController controller = new PresenceMessageController(service);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        PresenceMessageController controller = new PresenceMessageController(
+                service, new WebSocketMetrics(registry));
         MungrouteUserPrincipal user = new MungrouteUserPrincipal(
                 7L, "walker@example.com", "password", "walker",
                 List.of(new SimpleGrantedAuthority("ROLE_USER"))
@@ -55,6 +58,9 @@ class PresenceMessageControllerTest {
         PresenceUpdateResponse result = controller.update(request, authentication);
 
         assertThat(result).isSameAs(expected);
+        assertThat(registry.get("mungroute.websocket.message")
+                .tags("destination", "presence", "result", "success")
+                .timer().count()).isEqualTo(1);
         verify(service).update(7L, request);
     }
 }

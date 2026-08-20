@@ -9,6 +9,8 @@ public interface PresenceLocationStore {
 
     Optional<PresenceSessionState> findSession(long sessionId);
 
+    void cacheSession(PresenceSessionState session);
+
     List<NearbyPresenceLocation> findNearby(
             PresenceLocation origin,
             int radiusMeters,
