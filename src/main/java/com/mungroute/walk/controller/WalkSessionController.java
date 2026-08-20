@@ -7,6 +7,7 @@ import com.mungroute.walk.dto.request.SaveWalkRequest;
 import com.mungroute.walk.dto.request.SetRepresentativeRequest;
 import com.mungroute.walk.dto.request.RenameWalkRequest;
 import com.mungroute.walk.dto.response.EndWalkResponse;
+import com.mungroute.walk.dto.response.ActiveWalkStateResponse;
 import com.mungroute.walk.dto.response.ChangeWalkModeResponse;
 import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.dto.response.WalkRecordDetailResponse;
@@ -93,6 +94,14 @@ public class WalkSessionController {
                 walkSessionService.endWalk(principal.userId(), sessionId);
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{sessionId}/state")
+    public ResponseEntity<ActiveWalkStateResponse> activeState(
+            @AuthenticationPrincipal MungrouteUserPrincipal principal,
+            @PathVariable @Positive Long sessionId
+    ) {
+        return ResponseEntity.ok(walkSessionService.activeState(principal.userId(), sessionId));
     }
 
     @PostMapping("/{sessionId}/pause")

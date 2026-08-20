@@ -13,6 +13,7 @@ public enum GroupErrorCode implements ErrorCode {
     GROUP_OWNER_LEAVE_NOT_ALLOWED(HttpStatus.CONFLICT, "방장은 그룹을 탈퇴할 수 없습니다. 그룹 삭제를 이용해 주세요."),
     GROUP_MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "그룹 멤버를 찾을 수 없습니다."),
     GROUP_COURSE_ALREADY_SHARED(HttpStatus.CONFLICT, "이미 이 그룹에 공유된 코스입니다."),
+    GROUP_SAVED_COURSE_RESHARE_NOT_ALLOWED(HttpStatus.CONFLICT, "그룹에서 저장한 코스는 다시 그룹에 공유할 수 없습니다."),
     GROUP_SHARED_COURSE_NOT_FOUND(HttpStatus.NOT_FOUND, "공유 코스를 찾을 수 없습니다."),
     GROUP_SHARED_COURSE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "이 공유 코스를 취소할 권한이 없습니다."),
     GROUP_COURSE_ALREADY_SAVED(HttpStatus.CONFLICT, "이미 내 코스로 저장한 공유 코스입니다."),

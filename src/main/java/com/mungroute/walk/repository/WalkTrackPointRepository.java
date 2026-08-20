@@ -52,4 +52,18 @@ public interface WalkTrackPointRepository extends JpaRepository<WalkTrackPoint, 
             @Param("lat") Double lat,
             @Param("accuracy") BigDecimal accuracy
     );
+
+    @Query(value = """
+            WITH usable_ordered AS (
+                SELECT location,
+                       LAG(location) OVER (ORDER BY recorded_at, point_id) AS previous_location
+                FROM walk_track_point
+                WHERE session_id = :sessionId
+                  AND accuracy_m <= 40.0
+            )
+            SELECT COALESCE(SUM(ST_Distance(previous_location, location)), 0.0)
+            FROM usable_ordered
+            WHERE previous_location IS NOT NULL
+            """, nativeQuery = true)
+    double calculateLiveDistanceM(@Param("sessionId") Long sessionId);
 }

@@ -19,6 +19,7 @@ import com.mungroute.course.service.CourseMetricsCalculator;
 import com.mungroute.course.service.CourseProcessingException;
 import com.mungroute.course.service.SegmentSwapService;
 import com.mungroute.global.exception.BusinessException;
+import com.mungroute.group.repository.GroupRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -41,6 +42,7 @@ public class CourseCatalogService {
     private final SegmentSwapService segmentSwapService;
     private final SolarPositionService solarPositionService;
     private final ObjectMapper objectMapper;
+    private final GroupRepository groupRepository;
 
     public CourseCatalogService(
             CourseCatalogRepository catalogRepository,
@@ -48,7 +50,8 @@ public class CourseCatalogService {
             CourseMetricsCalculator metricsCalculator,
             SegmentSwapService segmentSwapService,
             SolarPositionService solarPositionService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            GroupRepository groupRepository
     ) {
         this.catalogRepository = catalogRepository;
         this.routingRepository = routingRepository;
@@ -56,6 +59,7 @@ public class CourseCatalogService {
         this.segmentSwapService = segmentSwapService;
         this.solarPositionService = solarPositionService;
         this.objectMapper = objectMapper;
+        this.groupRepository = groupRepository;
     }
 
     @Transactional(readOnly = true)
@@ -104,6 +108,9 @@ public class CourseCatalogService {
     public void delete(long userId, String sourceValue, long courseId) {
         CourseSource source = parseSource(sourceValue);
         owned(userId, source, courseId);
+        if (groupRepository.isCourseShared(source.name().toLowerCase(Locale.ROOT), courseId)) {
+            throw new BusinessException(CourseCatalogErrorCode.COURSE_SHARED_WITH_GROUP);
+        }
         if (catalogRepository.deleteOwned(userId, source, courseId) != 1) {
             throw new BusinessException(CourseCatalogErrorCode.COURSE_NOT_FOUND);
         }

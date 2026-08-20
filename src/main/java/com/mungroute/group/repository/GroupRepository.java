@@ -25,6 +25,8 @@ public interface GroupRepository {
     Optional<GroupInviteRow> findUsableInvite(String code, OffsetDateTime now);
 
     long shareCourse(long groupId, long userId, String source, long courseId);
+    boolean isCourseShared(String source, long courseId);
+    boolean isGroupSavedCourse(long customCourseId);
     Optional<SharedCourseRow> findSharedCourse(long groupId, long sharedCourseId);
     List<SharedCourseRow> findSharedCourses(long groupId, int size);
     int deleteSharedCourse(long groupId, long sharedCourseId);

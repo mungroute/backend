@@ -203,6 +203,9 @@ public class GroupService {
         memberGroup(userId, groupId);
         String source = normalizeSource(request.courseSource());
         CourseDetailResponse course = courseCatalogService.detail(userId, source, request.courseId(), requestedAt);
+        if ("custom".equals(source) && groupRepository.isGroupSavedCourse(request.courseId())) {
+            throw new BusinessException(GroupErrorCode.GROUP_SAVED_COURSE_RESHARE_NOT_ALLOWED);
+        }
         long sharedId;
         try {
             sharedId = groupRepository.shareCourse(groupId, userId, source, request.courseId());

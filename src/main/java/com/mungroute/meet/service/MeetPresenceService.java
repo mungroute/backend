@@ -67,7 +67,7 @@ public class MeetPresenceService {
                             haversine(origin.latitude(), origin.longitude(), candidate.latitude(), candidate.longitude())))
                     .filter(candidate -> candidate.distance <= request.radiusM())
                     .sorted(Comparator.comparingDouble(CandidateWithDistance::distance))
-                    .limit(3)
+                    .limit(CANDIDATE_LIMIT)
                     .flatMap(candidate -> meetRepository.findProfile(candidate.location.userId()).stream()
                             .map(profile -> new CandidateWithProfile(candidate, profile)))
                     .map(candidate -> new MeetCandidateResponse(
@@ -77,7 +77,8 @@ public class MeetPresenceService {
                     )).toList()
                 : List.of();
 
-        return new MeetPresenceResponse(request.sessionId(), now, request.stationary() ? 10 : 4, candidates, connection);
+        return new MeetPresenceResponse(request.sessionId(), now, request.stationary() ? 10 : 4,
+                request.radiusM(), candidates, connection);
     }
 
     private java.util.Optional<MeetConnectionResponse> connection(long sessionId, long userId, MeetRequestRecord request) {
