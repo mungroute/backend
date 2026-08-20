@@ -95,7 +95,7 @@ class CourseDrawServiceTest {
                         501L, 1L, 2L, new BigDecimal("200.00"), new BigDecimal("0.420"),
                         new BigDecimal("31.20"), "MEDIUM", LocalDate.of(2026, 8, 11)
                 )));
-        when(metricsCalculator.calculate(any())).thenReturn(new CourseMetrics(
+        when(metricsCalculator.calculate(any(), any(CourseCalculationContext.class))).thenReturn(new CourseMetrics(
                 new BigDecimal("123.45"), 3, new BigDecimal("0.420"), new BigDecimal("31.20"),
                 "REFERENCE", LocalDate.of(2026, 8, 11), "MEDIUM"
         ));

@@ -8,6 +8,7 @@ import com.mungroute.course.domain.CourseSegmentData;
 import com.mungroute.course.domain.PathCandidate;
 import com.mungroute.course.domain.SegmentSwapResult;
 import com.mungroute.course.domain.SwappedSection;
+import com.mungroute.course.draw.time.CourseCalculationContext;
 import com.mungroute.course.repository.CourseRoutingRepository;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
 import org.springframework.stereotype.Service;
@@ -53,13 +54,33 @@ public class SegmentSwapService {
             int targetTimeMin,
             double overallDetourRatio
     ) {
+        return recommendInternal(basePath, referenceTime, null, targetTimeMin, overallDetourRatio);
+    }
+
+    public SegmentSwapResult recommend(
+            CoursePath basePath,
+            CourseCalculationContext context,
+            int targetTimeMin,
+            double overallDetourRatio
+    ) {
+        if (context == null) throw new IllegalArgumentException("코스 계산 컨텍스트는 필수입니다.");
+        return recommendInternal(basePath, context.referenceTime(), context, targetTimeMin, overallDetourRatio);
+    }
+
+    private SegmentSwapResult recommendInternal(
+            CoursePath basePath,
+            ThermalReferenceTime referenceTime,
+            CourseCalculationContext context,
+            int targetTimeMin,
+            double overallDetourRatio
+    ) {
         if (targetTimeMin <= 0 || !Double.isFinite(overallDetourRatio) || overallDetourRatio < 0) {
             throw new IllegalArgumentException("목표 시간과 허용 우회율이 올바르지 않습니다.");
         }
         List<CourseSegmentData> baseSegments = loadComplete(basePath.segmentIds(), referenceTime);
         CourseMetrics baseMetrics;
         try {
-            baseMetrics = metricsCalculator.calculate(baseSegments);
+            baseMetrics = calculate(baseSegments, context);
         } catch (CourseProcessingException exception) {
             return failure(referenceTime, basePath, null, exception.reason());
         }
@@ -80,7 +101,8 @@ public class SegmentSwapService {
                 basePath,
                 baseSegments,
                 sections,
-                referenceTime
+                referenceTime,
+                context
         );
         if (collected.candidates().isEmpty()) {
             return failure(referenceTime, basePath, baseMetrics, collected.failureReason());
@@ -97,7 +119,7 @@ public class SegmentSwapService {
             List<CourseSegmentData> alternativeSegments = loadComplete(alternativeIds, referenceTime);
             CourseMetrics alternativeMetrics;
             try {
-                alternativeMetrics = metricsCalculator.calculate(alternativeSegments);
+                alternativeMetrics = calculate(alternativeSegments, context);
             } catch (CourseProcessingException exception) {
                 continue;
             }
@@ -148,7 +170,8 @@ public class SegmentSwapService {
             CoursePath basePath,
             List<CourseSegmentData> baseSegments,
             List<CourseSection> sections,
-            ThermalReferenceTime referenceTime
+            ThermalReferenceTime referenceTime,
+            CourseCalculationContext context
     ) {
         List<SectionCandidate> candidates = new ArrayList<>();
         boolean foundPath = false;
@@ -157,9 +180,8 @@ public class SegmentSwapService {
         Set<Long> allBaseIds = new HashSet<>(basePath.segmentIds());
 
         for (CourseSection section : sections) {
-            CourseMetrics originalMetrics = metricsCalculator.calculate(
-                    baseSegments.subList(section.fromSegmentIndex(), section.toSegmentIndexExclusive())
-            );
+            CourseMetrics originalMetrics = calculate(
+                    baseSegments.subList(section.fromSegmentIndex(), section.toSegmentIndexExclusive()), context);
             Set<Long> outsideSection = new HashSet<>(allBaseIds);
             outsideSection.removeAll(section.segmentIds());
             List<PathCandidate> rawPaths = routingRepository.findKShortestPaths(
@@ -176,7 +198,7 @@ public class SegmentSwapService {
                 }
                 foundPath = true;
                 List<CourseSegmentData> candidateSegments = loadComplete(rawPath.segmentIds(), referenceTime);
-                CourseMetrics candidateMetrics = metricsCalculator.calculate(candidateSegments);
+                CourseMetrics candidateMetrics = calculate(candidateSegments, context);
                 BigDecimal addedLength = candidateMetrics.lengthM().subtract(section.lengthM());
                 BigDecimal sectionDetourLimit = section.lengthM()
                         .multiply(BigDecimal.valueOf(policy.sectionDetourRatio()));
@@ -262,6 +284,12 @@ public class SegmentSwapService {
             );
         }
         return segments;
+    }
+
+    private CourseMetrics calculate(List<CourseSegmentData> segments, CourseCalculationContext context) {
+        return context == null
+                ? metricsCalculator.calculate(segments)
+                : metricsCalculator.calculate(segments, context);
     }
 
     private boolean withinTargetTime(BigDecimal lengthM, int targetTimeMin) {

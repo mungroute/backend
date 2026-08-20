@@ -9,8 +9,11 @@ import com.mungroute.course.catalog.exception.CourseCatalogErrorCode;
 import com.mungroute.course.catalog.repository.CourseCatalogRepository;
 import com.mungroute.course.catalog.repository.CourseCatalogRow;
 import com.mungroute.course.domain.CourseSource;
+import com.mungroute.course.domain.CourseMetrics;
+import com.mungroute.course.domain.CourseSegmentData;
 import com.mungroute.course.draw.time.CourseCalculationContext;
 import com.mungroute.course.draw.time.SolarPositionService;
+import com.mungroute.course.service.CourseMetricsCalculator;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
 import org.springframework.stereotype.Service;
@@ -36,6 +39,7 @@ public class CourseDiagnosticService {
     private final CourseCatalogRepository catalogRepository;
     private final CourseDiagnosticRepository diagnosticRepository;
     private final SolarPositionService solarPositionService;
+    private final CourseMetricsCalculator metricsCalculator;
     private final ObjectMapper objectMapper;
     private final CourseRouteSlicer routeSlicer;
     private final CourseLegResolver legResolver;
@@ -44,11 +48,13 @@ public class CourseDiagnosticService {
             CourseCatalogRepository catalogRepository,
             CourseDiagnosticRepository diagnosticRepository,
             SolarPositionService solarPositionService,
+            CourseMetricsCalculator metricsCalculator,
             ObjectMapper objectMapper
     ) {
         this.catalogRepository = catalogRepository;
         this.diagnosticRepository = diagnosticRepository;
         this.solarPositionService = solarPositionService;
+        this.metricsCalculator = metricsCalculator;
         this.objectMapper = objectMapper;
         this.routeSlicer = new CourseRouteSlicer(objectMapper);
         this.legResolver = new CourseLegResolver(objectMapper);
@@ -83,6 +89,27 @@ public class CourseDiagnosticService {
         }
 
         List<BigDecimal> lengths = effectiveLengths(course, rows);
+        List<CourseSegmentData> thermalInputs = new ArrayList<>(rows.size());
+        for (int index = 0; index < rows.size(); index++) {
+            CourseDiagnosticSegmentRow row = rows.get(index);
+            thermalInputs.add(new CourseSegmentData(
+                    row.segmentId(), 0, 0, lengths.get(index), row.shadeRatio(), row.surfaceTempC(),
+                    row.thermalModelConfidence(), row.thermalWeatherDate(), row.surfaceType(),
+                    row.svf(), row.albedo(), row.emissivity(), row.groundFluxRatio(), row.parkProximityM()
+            ));
+        }
+        CourseMetrics resolvedMetrics = metricsCalculator.calculate(thermalInputs, context);
+        List<CourseSegmentData> resolvedSegments = metricsCalculator.resolveSegments(thermalInputs, context);
+        if (resolvedSegments != thermalInputs) {
+            List<CourseDiagnosticSegmentRow> resolvedRows = new ArrayList<>(rows.size());
+            for (int index = 0; index < rows.size(); index++) {
+                resolvedRows.add(rows.get(index).withThermal(
+                        resolvedSegments.get(index).surfaceTempC(),
+                        resolvedSegments.get(index).thermalWeatherDate()
+                ));
+            }
+            rows = resolvedRows;
+        }
         CourseLegResolver.Resolution legResolution = resolveLegSequences(course, lengths, rows.size());
         List<Integer> legSequences = legResolution.legSequences();
         List<JsonNode> slicedRoutes = routeSlicer.split(
@@ -138,7 +165,7 @@ public class CourseDiagnosticService {
                 + hottest.estimatedSurfaceTempC().toPlainString() + "℃예요. " + hottest.explanation();
         return new CourseDiagnosticsResponse(
                 course.source(), course.courseId(), course.courseName(), referenceTime.time().getHour(),
-                context.shadeApplicable() ? "SELECTED_REFERENCE" : "H18_REFERENCE",
+                temperatureLayerBasis(resolvedMetrics, context),
                 context.solarState().name(), context.shadeApplicable(),
                 context.shadeApplicable() ? null : NIGHT_SHADE_MESSAGE,
                 scale(courseAverage, 1),
@@ -146,6 +173,17 @@ public class CourseDiagnosticService {
                 hottest == null ? null : hottest.segmentId(),
                 summary, METHOD, context.calculatedAt(), segments
         );
+    }
+
+    private static String temperatureLayerBasis(
+            CourseMetrics metrics,
+            CourseCalculationContext context
+    ) {
+        return switch (metrics.thermalStatus()) {
+            case "NOWCAST" -> "NOWCAST_FIXED_SHADE";
+            case "CACHED" -> "CACHED_FIXED_SHADE";
+            default -> context.shadeApplicable() ? "SELECTED_REFERENCE" : "H18_REFERENCE";
+        };
     }
 
     private List<BigDecimal> effectiveLengths(

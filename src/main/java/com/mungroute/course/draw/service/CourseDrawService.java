@@ -151,23 +151,17 @@ public class CourseDrawService {
             if (source == null || source.segmentId() != traversal.segmentId()) {
                 throw new BusinessException(CourseDrawErrorCode.INVALID_COURSE_PATH);
             }
-            measuredSegments.add(new CourseSegmentData(
-                    source.segmentId(),
-                    source.source(),
-                    source.target(),
-                    traversal.lengthM(),
-                    source.shadeRatio(),
-                    source.surfaceTempC(),
-                    source.thermalModelConfidence(),
-                    source.thermalWeatherDate()
-            ));
+            measuredSegments.add(source.withLength(traversal.lengthM()));
         }
-        return calculateMetricsFromSegments(measuredSegments);
+        return calculateMetricsFromSegments(measuredSegments, context);
     }
 
-    private CourseMetrics calculateMetricsFromSegments(List<CourseSegmentData> segments) {
+    private CourseMetrics calculateMetricsFromSegments(
+            List<CourseSegmentData> segments,
+            CourseCalculationContext context
+    ) {
         try {
-            return metricsCalculator.calculate(segments);
+            return metricsCalculator.calculate(segments, context);
         } catch (CourseProcessingException exception) {
             throw new BusinessException(CourseDrawErrorCode.THERMAL_DATA_UNAVAILABLE);
         }
@@ -261,7 +255,7 @@ public class CourseDrawService {
                 context.shadeApplicable() ? metrics.shadeRatio() : null,
                 metrics.estimatedSurfaceTempC(),
                 context.referenceTime().time().getHour(),
-                context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE",
+                weatherSource(metrics, context),
                 metrics.basisDate(),
                 metrics.confidence(),
                 context.calculatedAt(),
@@ -269,6 +263,13 @@ public class CourseDrawService {
                 Math.round(context.solarElevationDeg() * 1000.0) / 1000.0,
                 context.shadeApplicable()
         );
+    }
+
+    private static String weatherSource(CourseMetrics metrics, CourseCalculationContext context) {
+        return switch (metrics.thermalStatus()) {
+            case "NOWCAST", "CACHED" -> metrics.thermalStatus();
+            default -> context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE";
+        };
     }
 
     private boolean samePosition(

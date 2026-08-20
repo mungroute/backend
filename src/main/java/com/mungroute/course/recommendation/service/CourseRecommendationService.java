@@ -170,9 +170,11 @@ public class CourseRecommendationService {
                 withinTarget(duration, targetDurationMin),
                 metrics != null && metrics.shadeApplicable(),
                 metrics == null ? 0 : metrics.referenceHour(),
+                metrics == null ? weatherSource(null, context) : metrics.weatherSource(),
                 detail.route(),
                 detail.segmentIds(),
-                thermalSegments(routingRepository.findSegmentsInOrder(detail.segmentIds(), context.referenceTime())),
+                thermalSegments(
+                        routingRepository.findSegmentsInOrder(detail.segmentIds(), context.referenceTime()), context),
                 savedReasons(duration, targetDurationMin, summary.representative())
         );
     }
@@ -255,7 +257,7 @@ public class CourseRecommendationService {
         if (segments.size() != segmentIds.size() || segments.stream().anyMatch(segment -> segment == null)) return false;
         CourseMetrics metrics;
         try {
-            metrics = metricsCalculator.calculate(segments);
+            metrics = metricsCalculator.calculate(segments, context);
         } catch (CourseProcessingException exception) {
             return false;
         }
@@ -294,15 +296,27 @@ public class CourseRecommendationService {
                 withinTarget(draft.metrics().durationMin(), targetDurationMin),
                 context.shadeApplicable(),
                 context.referenceTime().time().getHour(),
+                weatherSource(draft.metrics(), context),
                 route,
                 draft.segmentIds(),
-                thermalSegments(draft.segments()),
+                thermalSegments(draft.segments(), context),
                 generatedReasons(draft, targetDurationMin, context.shadeApplicable())
         );
     }
 
-    private List<CourseRecommendationThermalSegmentResponse> thermalSegments(List<CourseSegmentData> segments) {
-        return segments.stream()
+    private static String weatherSource(CourseMetrics metrics, CourseCalculationContext context) {
+        if (metrics != null && ("NOWCAST".equals(metrics.thermalStatus())
+                || "CACHED".equals(metrics.thermalStatus()))) {
+            return metrics.thermalStatus();
+        }
+        return context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE";
+    }
+
+    private List<CourseRecommendationThermalSegmentResponse> thermalSegments(
+            List<CourseSegmentData> segments,
+            CourseCalculationContext context
+    ) {
+        return metricsCalculator.resolveSegments(segments, context).stream()
                 .filter(segment -> segment != null && segment.surfaceTempC() != null)
                 .map(segment -> new CourseRecommendationThermalSegmentResponse(
                         segment.segmentId(),

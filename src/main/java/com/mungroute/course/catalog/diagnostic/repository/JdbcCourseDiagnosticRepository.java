@@ -45,6 +45,8 @@ public class JdbcCourseDiagnosticRepository implements CourseDiagnosticRepositor
                        segment.surface_type,
                        segment.svf,
                        segment.albedo,
+                       segment.emissivity,
+                       segment.ground_flux_ratio,
                        segment.park_proximity_m,
                        segment.thermal_model_confidence,
                        segment.thermal_weather_date
@@ -122,6 +124,8 @@ public class JdbcCourseDiagnosticRepository implements CourseDiagnosticRepositor
                 resultSet.getString("surface_type"),
                 resultSet.getBigDecimal("svf"),
                 resultSet.getBigDecimal("albedo"),
+                resultSet.getBigDecimal("emissivity"),
+                resultSet.getBigDecimal("ground_flux_ratio"),
                 resultSet.getBigDecimal("park_proximity_m"),
                 resultSet.getString("thermal_model_confidence"),
                 resultSet.getObject("thermal_weather_date", java.time.LocalDate.class)

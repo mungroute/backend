@@ -43,7 +43,9 @@ public class JdbcCourseRoutingRepository implements CourseRoutingRepository {
                        %s AS shade_ratio,
                        %s AS surface_temp_c,
                        thermal_model_confidence,
-                       thermal_weather_date
+                       thermal_weather_date,
+                       surface_type, svf, albedo, emissivity,
+                       ground_flux_ratio, park_proximity_m
                 FROM route_segment
                 WHERE segment_id IN (%s)
                 """.formatted(shadeColumn(referenceTime), temperatureColumn(referenceTime), placeholders);
@@ -58,7 +60,13 @@ public class JdbcCourseRoutingRepository implements CourseRoutingRepository {
                     resultSet.getBigDecimal("shade_ratio"),
                     resultSet.getBigDecimal("surface_temp_c"),
                     resultSet.getString("thermal_model_confidence"),
-                    resultSet.getObject("thermal_weather_date", LocalDate.class)
+                    resultSet.getObject("thermal_weather_date", LocalDate.class),
+                    resultSet.getString("surface_type"),
+                    resultSet.getBigDecimal("svf"),
+                    resultSet.getBigDecimal("albedo"),
+                    resultSet.getBigDecimal("emissivity"),
+                    resultSet.getBigDecimal("ground_flux_ratio"),
+                    resultSet.getBigDecimal("park_proximity_m")
             );
             byId.put(segment.segmentId(), segment);
         }, segmentIds.toArray());

@@ -126,7 +126,7 @@ public class CourseCatalogService {
         }
         var result = segmentSwapService.recommend(
                 new CoursePath(row.segmentIds()),
-                context.referenceTime(),
+                context,
                 Math.max(1, usualMetrics.durationMin()),
                 COMPARISON_DETOUR_RATIO
         );
@@ -213,14 +213,11 @@ public class CourseCatalogService {
             measured = new ArrayList<>(sourceSegments.size());
             for (int index = 0; index < sourceSegments.size(); index++) {
                 CourseSegmentData source = sourceSegments.get(index);
-                measured.add(new CourseSegmentData(
-                        source.segmentId(), source.source(), source.target(), row.segmentLengthsM().get(index),
-                        source.shadeRatio(), source.surfaceTempC(), source.thermalModelConfidence(), source.thermalWeatherDate()
-                ));
+                measured.add(source.withLength(row.segmentLengthsM().get(index)));
             }
         }
         try {
-            return metricsCalculator.calculate(measured);
+            return metricsCalculator.calculate(measured, context);
         } catch (CourseProcessingException exception) {
             if (required) throw new BusinessException(CourseCatalogErrorCode.COURSE_METRICS_UNAVAILABLE);
             throw exception;
@@ -236,12 +233,19 @@ public class CourseCatalogService {
                 metrics.lengthM(), metrics.durationMin(),
                 context.shadeApplicable() ? metrics.shadeRatio() : null,
                 metrics.estimatedSurfaceTempC(), context.referenceTime().time().getHour(),
-                context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE",
+                weatherSource(metrics, context),
                 metrics.basisDate(), metrics.confidence(), context.calculatedAt(),
                 context.solarState().name(),
                 Math.round(context.solarElevationDeg() * 1000.0) / 1000.0,
                 context.shadeApplicable()
         );
+    }
+
+    private static String weatherSource(CourseMetrics metrics, CourseCalculationContext context) {
+        return switch (metrics.thermalStatus()) {
+            case "NOWCAST", "CACHED" -> metrics.thermalStatus();
+            default -> context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE";
+        };
     }
 
     private CourseCatalogRow owned(long userId, CourseSource source, long courseId) {
