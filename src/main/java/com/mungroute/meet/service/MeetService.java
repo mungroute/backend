@@ -3,6 +3,7 @@ package com.mungroute.meet.service;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.meet.dto.request.MeetProfileRequest;
 import com.mungroute.meet.dto.response.MeetEventResponse;
+import com.mungroute.meet.dto.response.MeetProfilePreviewResponse;
 import com.mungroute.meet.dto.response.MeetProfileResponse;
 import com.mungroute.meet.dto.response.MeetRequestResponse;
 import com.mungroute.meet.exception.MeetErrorCode;
@@ -43,7 +44,9 @@ public class MeetService {
     @Transactional
     public MeetProfileResponse saveProfile(long userId, MeetProfileRequest request) {
         List<String> tags = request.temperamentTags() == null ? List.of() : request.temperamentTags().stream().distinct().toList();
-        meetRepository.upsertProfile(userId, request.dogName(), request.breed(), request.ageYears(), request.profileImageUrl(), tags);
+        meetRepository.upsertProfile(userId, request.dogName(), request.breed(), request.ageYears(),
+                request.profileImageUrl(), tags, request.leashGreeting(), request.strangerResponse(),
+                request.touchTolerance(), request.barkingLevel(), request.bitingLevel());
         return meetRepository.findProfile(userId).map(MeetProfileResponse::from).orElseThrow();
     }
 
@@ -187,12 +190,13 @@ public class MeetService {
     }
 
     private MeetRequestResponse response(MeetRequestRecord request, long viewerUserId) {
+        var otherProfile = meetRepository.findProfile(request.otherUserId(viewerUserId));
+        MeetProfilePreviewResponse preview = otherProfile.map(MeetProfilePreviewResponse::from).orElse(null);
         MeetProfileResponse profile = "ACCEPTED".equals(request.status())
-                ? meetRepository.findProfile(request.otherUserId(viewerUserId)).map(MeetProfileResponse::from).orElse(null)
-                : null;
+                ? otherProfile.map(MeetProfileResponse::from).orElse(null) : null;
         return new MeetRequestResponse(request.requestId(),
                 request.requesterUserId() == viewerUserId ? "OUTGOING" : "INCOMING",
-                request.status(), request.createdAt(), request.expiresAt(), profile);
+                request.status(), request.createdAt(), request.expiresAt(), preview, profile);
     }
 
     private void send(String email, String type, MeetRequestResponse response) {

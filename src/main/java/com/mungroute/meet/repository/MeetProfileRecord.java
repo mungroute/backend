@@ -8,6 +8,11 @@ public record MeetProfileRecord(
         String breed,
         Integer ageYears,
         String profileImageUrl,
-        List<String> temperamentTags
+        List<String> temperamentTags,
+        String leashGreeting,
+        String strangerResponse,
+        String touchTolerance,
+        String barkingLevel,
+        String bitingLevel
 ) {
 }

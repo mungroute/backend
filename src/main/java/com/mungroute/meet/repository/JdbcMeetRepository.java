@@ -20,29 +20,41 @@ public class JdbcMeetRepository implements MeetRepository {
     }
 
     @Override
-    public void upsertProfile(long userId, String dogName, String breed, Integer ageYears, String profileImageUrl, List<String> tags) {
+    public void upsertProfile(long userId, String dogName, String breed, Integer ageYears, String profileImageUrl,
+                              List<String> tags, String leashGreeting, String strangerResponse, String touchTolerance,
+                              String barkingLevel, String bitingLevel) {
         jdbcTemplate.update("""
-                INSERT INTO meet_profile(user_id, dog_name, breed, age_years, profile_image_url, temperament_tags, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
+                INSERT INTO meet_profile(user_id, dog_name, breed, age_years, profile_image_url, temperament_tags,
+                    leash_greeting, stranger_response, touch_tolerance, barking_level, biting_level, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
                 ON CONFLICT (user_id) DO UPDATE SET
                     dog_name = EXCLUDED.dog_name,
                     breed = EXCLUDED.breed,
                     age_years = EXCLUDED.age_years,
                     profile_image_url = EXCLUDED.profile_image_url,
                     temperament_tags = EXCLUDED.temperament_tags,
+                    leash_greeting = EXCLUDED.leash_greeting,
+                    stranger_response = EXCLUDED.stranger_response,
+                    touch_tolerance = EXCLUDED.touch_tolerance,
+                    barking_level = EXCLUDED.barking_level,
+                    biting_level = EXCLUDED.biting_level,
                     updated_at = now()
-                """, userId, dogName, breed, ageYears, profileImageUrl, tags.toArray(String[]::new));
+                """, userId, dogName, breed, ageYears, profileImageUrl, tags.toArray(String[]::new),
+                leashGreeting, strangerResponse, touchTolerance, barkingLevel, bitingLevel);
     }
 
     @Override
     public Optional<MeetProfileRecord> findProfile(long userId) {
         return jdbcTemplate.query("""
-                SELECT user_id, dog_name, breed, age_years, profile_image_url, temperament_tags
+                SELECT user_id, dog_name, breed, age_years, profile_image_url, temperament_tags,
+                       leash_greeting, stranger_response, touch_tolerance, barking_level, biting_level
                 FROM meet_profile WHERE user_id = ?
                 """, (rs, rowNum) -> new MeetProfileRecord(
                 rs.getLong("user_id"), rs.getString("dog_name"), rs.getString("breed"),
                 rs.getObject("age_years", Integer.class), rs.getString("profile_image_url"),
-                stringList(rs.getArray("temperament_tags"))
+                stringList(rs.getArray("temperament_tags")), rs.getString("leash_greeting"),
+                rs.getString("stranger_response"), rs.getString("touch_tolerance"),
+                rs.getString("barking_level"), rs.getString("biting_level")
         ), userId).stream().findFirst();
     }
 
