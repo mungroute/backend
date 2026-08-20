@@ -18,13 +18,13 @@ public class MungrouteUserDetailsService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        return userRepository.findByEmail(email.trim().toLowerCase(Locale.ROOT))
+        return userRepository.findByEmailAndDeletedAtIsNull(email.trim().toLowerCase(Locale.ROOT))
                 .map(MungrouteUserPrincipal::from)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 
     public MungrouteUserPrincipal loadUserById(Long userId) {
-        return userRepository.findById(userId)
+        return userRepository.findByUserIdAndDeletedAtIsNull(userId)
                 .map(MungrouteUserPrincipal::from)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }

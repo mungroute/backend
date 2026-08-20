@@ -2,8 +2,16 @@ spring:
   application:
     name: mungroute-backend
 
+  config:
+    import: optional:file:.env[.properties]
+
   profiles:
     default: local
+
+  datasource:
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:16}
+      minimum-idle: ${DB_POOL_MIN_IDLE:4}
 
   jpa:
     hibernate:
@@ -46,11 +54,34 @@ course:
     section-detour-ratio: 0.40
     max-swapped-sections: 2
 
+external:
+  food-safety:
+    pet-restaurants:
+      export-url: ${FOOD_SAFETY_PET_RESTAURANTS_EXPORT_URL:https://www.foodsafetykorea.go.kr/portal/petKorea/downloadExcel.do}
+      cache-ttl: ${FOOD_SAFETY_PET_RESTAURANTS_CACHE_TTL:6h}
+  kakao:
+    local:
+      base-url: ${KAKAO_LOCAL_BASE_URL:https://dapi.kakao.com}
+      rest-api-key: ${KAKAO_REST_API_KEY:}
+  kto:
+    pet-tour:
+      base-url: ${KTO_PET_TOUR_BASE_URL:https://apis.data.go.kr/B551011/KorPetTourService2}
+      service-key: ${KTO_PET_TOUR_SERVICE_KEY:}
+      mobile-os: ${KTO_PET_TOUR_MOBILE_OS:ETC}
+      mobile-app: ${KTO_PET_TOUR_MOBILE_APP:MungRoute}
+
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,flyway
+        include: health,info,flyway,prometheus,metrics
+
+  metrics:
+    distribution:
+      percentiles-histogram:
+        mungroute.websocket.message: true
+        mungroute.websocket.queue.delay: true
+        mungroute.presence.stage: true
 
   endpoint:
     health:

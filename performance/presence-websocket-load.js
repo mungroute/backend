@@ -10,6 +10,7 @@ const fixtures = new SharedArray('websocket presence sessions', () => JSON.parse
 const holdSeconds = Number(__ENV.WS_HOLD_SECONDS || (smoke ? 15 : 150))
 const sendEverySeconds = Number(__ENV.WS_SEND_INTERVAL_SECONDS || 4)
 const rampSeconds = Number(__ENV.WS_RAMP_SECONDS || (smoke ? 3 : 45))
+const ackGraceSeconds = Number(__ENV.WS_ACK_GRACE_SECONDS || 2)
 
 if (fixtures.length < targetVus && __ENV.ALLOW_FIXTURE_REUSE !== 'true') {
   fail(`Need at least ${targetVus} distinct presence fixtures; received ${fixtures.length}.`)
@@ -20,10 +21,15 @@ const websocketRoundTrip = new Trend('presence_ws_round_trip', true)
 const websocketSessionFailed = new Rate('presence_ws_session_failed')
 const websocketPrivacyFailed = new Rate('presence_ws_privacy_failed')
 const websocketMessages = new Counter('presence_ws_messages')
+const websocketUpdatesSent = new Counter('presence_ws_updates_sent')
+const websocketResponseRatio = new Trend('presence_ws_response_ratio')
+const websocketLatestAckMissing = new Rate('presence_ws_latest_ack_missing')
+const websocketLastResponseAge = new Trend('presence_ws_last_response_age', true)
 
 const functionalThresholds = {
   presence_ws_session_failed: ['rate<0.01'],
   presence_ws_privacy_failed: ['rate==0'],
+  presence_ws_latest_ack_missing: ['rate<0.01'],
 }
 
 export const options = {
@@ -73,11 +79,24 @@ export default function () {
   const startedAt = Date.now()
   let connected = false
   let messages = 0
-  let lastSentAt = 0
+  let messageSequence = 0
+  const sentAtByMessageId = new Map()
+  const sequenceByMessageId = new Map()
+  let updatesSent = 0
+  let latestSentSequence = -1
+  let latestAckedSequence = -1
+  let lastResponseAt
+  let finalized = false
   let failed = false
 
   const sendPresence = (socket) => {
-    lastSentAt = Date.now()
+    const sequence = messageSequence++
+    const clientMessageId = `${__VU}-${sequence}`
+    sentAtByMessageId.set(clientMessageId, Date.now())
+    sequenceByMessageId.set(clientMessageId, sequence)
+    latestSentSequence = sequence
+    updatesSent += 1
+    websocketUpdatesSent.add(1)
     const phase = (__ITER % 12) / 100000
     socket.send(frame('SEND', {
       destination: '/app/presence',
@@ -91,6 +110,7 @@ export default function () {
       heading: (__ITER * 15) % 360,
       stationary: __ITER % 5 === 0,
       radiusM: 100,
+      clientMessageId,
     })))
   }
 
@@ -114,7 +134,10 @@ export default function () {
           ack: 'auto',
         }))
         sendPresence(socket)
-        socket.setInterval(() => sendPresence(socket), sendEverySeconds * 1000)
+        const stopSendingAt = Date.now() + Math.max(0, holdSeconds - ackGraceSeconds) * 1000
+        socket.setInterval(() => {
+          if (Date.now() < stopSendingAt) sendPresence(socket)
+        }, sendEverySeconds * 1000)
         return
       }
 
@@ -122,7 +145,17 @@ export default function () {
         const payload = bodyOf(message)
         messages += 1
         websocketMessages.add(1)
-        if (lastSentAt > 0) websocketRoundTrip.add(Date.now() - lastSentAt)
+        const sentAt = sentAtByMessageId.get(payload.clientMessageId)
+        if (sentAt !== undefined) {
+          websocketRoundTrip.add(Date.now() - sentAt)
+          sentAtByMessageId.delete(payload.clientMessageId)
+        }
+        const acknowledgedSequence = sequenceByMessageId.get(payload.clientMessageId)
+        if (acknowledgedSequence !== undefined) {
+          latestAckedSequence = Math.max(latestAckedSequence, acknowledgedSequence)
+          sequenceByMessageId.delete(payload.clientMessageId)
+        }
+        lastResponseAt = Date.now()
         const safe = privacySafe(payload)
         websocketPrivacyFailed.add(!safe)
         if (!safe) failed = true
@@ -137,6 +170,16 @@ export default function () {
 
     socket.on('error', () => { failed = true })
     socket.setTimeout(() => {
+      if (!finalized && connected) {
+        finalized = true
+        const latestMissing = latestSentSequence < 0 || latestAckedSequence < latestSentSequence
+        websocketLatestAckMissing.add(latestMissing)
+        websocketResponseRatio.add(updatesSent === 0 ? 0 : messages / updatesSent)
+        if (lastResponseAt !== undefined) {
+          websocketLastResponseAge.add(Date.now() - lastResponseAt)
+        }
+        failed ||= latestMissing
+      }
       socket.close()
     }, holdSeconds * 1000)
   })

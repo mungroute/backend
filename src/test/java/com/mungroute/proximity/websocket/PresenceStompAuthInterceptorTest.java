@@ -3,6 +3,7 @@ package com.mungroute.proximity.websocket;
 import com.mungroute.auth.security.JwtUserAuthenticationConverter;
 import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.auth.security.UserPrincipalJwtAuthenticationToken;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -35,7 +36,7 @@ class PresenceStompAuthInterceptorTest {
     @Test
     void authenticatesConnectFrameWithBearerToken() {
         PresenceStompAuthInterceptor interceptor = new PresenceStompAuthInterceptor(
-                jwtDecoder, authenticationConverter
+                jwtDecoder, authenticationConverter, new WebSocketMetrics(new SimpleMeterRegistry())
         );
         Jwt jwt = Jwt.withTokenValue("valid-token")
                 .header("alg", "HS256")
@@ -62,12 +63,14 @@ class PresenceStompAuthInterceptorTest {
 
     @Test
     void rejectsConnectFrameWithoutToken() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         PresenceStompAuthInterceptor interceptor = new PresenceStompAuthInterceptor(
-                jwtDecoder, authenticationConverter
-        );
+                jwtDecoder, authenticationConverter, new WebSocketMetrics(registry));
 
         assertThatThrownBy(() -> interceptor.preSend(connectMessage(null), null))
                 .isInstanceOf(BadCredentialsException.class);
+        assertThat(registry.get("mungroute.websocket.errors")
+                .tag("type", "authentication").counter().count()).isEqualTo(1);
     }
 
     private Message<byte[]> connectMessage(String authorization) {

@@ -52,11 +52,13 @@ public class SecurityConfig {
                                 "/api/auth/check-nickname",
                                 "/api/auth/phone-verifications",
                                 "/api/auth/password-reset/**",
+                                "/api/places/restaurants/**",
                                 "/ws",
                                 "/ws/**",
                                 "/api/health",
                                 "/actuator/health",
                                 "/actuator/info",
+                                "/actuator/prometheus",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**"

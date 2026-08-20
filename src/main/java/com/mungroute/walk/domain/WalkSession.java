@@ -134,6 +134,17 @@ public class WalkSession {
         this.mode = mode;
     }
 
+    public void enablePresenceMode(WalkMode mode) {
+        if (mode == WalkMode.OFF) {
+            throw new IllegalArgumentException("활성화할 주변 사용자 모드는 off일 수 없습니다.");
+        }
+        if (lockedMode != null && lockedMode != mode) {
+            throw new IllegalStateException("이미 고정된 산책 모드와 다른 모드는 활성화할 수 없습니다.");
+        }
+        lockedMode = mode;
+        this.mode = mode;
+    }
+
     public BigDecimal getDistanceM() {
         return distanceM;
     }

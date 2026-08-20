@@ -17,9 +17,11 @@ import java.security.Principal;
 public class PresenceMessageController {
 
     private final PresenceUpdateService presenceUpdateService;
+    private final WebSocketMetrics metrics;
 
-    public PresenceMessageController(PresenceUpdateService presenceUpdateService) {
+    public PresenceMessageController(PresenceUpdateService presenceUpdateService, WebSocketMetrics metrics) {
         this.presenceUpdateService = presenceUpdateService;
+        this.metrics = metrics;
     }
 
     @MessageMapping("/presence")
@@ -30,8 +32,9 @@ public class PresenceMessageController {
     ) {
         if (!(principal instanceof Authentication authentication)
                 || !(authentication.getPrincipal() instanceof MungrouteUserPrincipal user)) {
+            metrics.recordError("authentication");
             throw new IllegalStateException("Authenticated WebSocket user is required");
         }
-        return presenceUpdateService.update(user.userId(), request);
+        return metrics.recordMessage("presence", () -> presenceUpdateService.update(user.userId(), request));
     }
 }

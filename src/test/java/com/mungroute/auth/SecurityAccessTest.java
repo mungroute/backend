@@ -9,6 +9,9 @@ import com.mungroute.auth.security.JwtUserAuthenticationConverter;
 import com.mungroute.auth.security.MungrouteUserDetailsService;
 import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.user.controller.UserController;
+import com.mungroute.place.controller.PlaceController;
+import com.mungroute.place.dto.PlaceSearchResponse;
+import com.mungroute.place.service.PlaceService;
 import com.mungroute.user.dto.response.UserResponse;
 import com.mungroute.walk.controller.WalkSessionController;
 import com.mungroute.walk.service.WalkRecordService;
@@ -35,7 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest({WalkSessionController.class, UserController.class, AuthController.class})
+@WebMvcTest({WalkSessionController.class, UserController.class, AuthController.class, PlaceController.class})
 @Import({SecurityConfig.class, SecurityProblemWriter.class, JwtUserAuthenticationConverter.class})
 @TestPropertySource(properties = {
         "security.jwt.secret=test-secret-that-is-at-least-32-bytes-long-123456",
@@ -69,6 +72,9 @@ class SecurityAccessTest {
     @MockitoBean
     PasswordResetService passwordResetService;
 
+    @MockitoBean
+    PlaceService placeService;
+
     @Test
     void anonymousUserCannotAccessWalkApi() throws Exception {
         mockMvc.perform(post("/api/walks/1/end"))
@@ -88,6 +94,39 @@ class SecurityAccessTest {
         mockMvc.perform(get("/api/health"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void prometheusEndpointPassesSecurityWithoutAuthentication() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void anonymousUserCanSearchNearbyRestaurants() throws Exception {
+        when(placeService.findNearbyRestaurants(37.55, 127.04, 2000, 1, 20))
+                .thenReturn(new PlaceSearchResponse(List.of(), 1, 20, 0));
+
+        mockMvc.perform(get("/api/places/restaurants/nearby")
+                        .param("latitude", "37.55")
+                        .param("longitude", "127.04"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.totalCount").value(0));
+    }
+
+    @Test
+    void anonymousUserCanListSeoulJungGuRestaurants() throws Exception {
+        when(placeService.findJungGuRestaurants(37.564, 126.997, 1, 100))
+                .thenReturn(new PlaceSearchResponse(List.of(), 1, 100, 0));
+
+        mockMvc.perform(get("/api/places/restaurants/areas/seoul-jung-gu")
+                        .param("latitude", "37.564")
+                        .param("longitude", "126.997"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.size").value(100));
     }
 
     @Test

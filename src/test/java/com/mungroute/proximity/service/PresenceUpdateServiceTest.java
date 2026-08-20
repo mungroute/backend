@@ -11,6 +11,7 @@ import com.mungroute.user.domain.AppUser;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.repository.WalkSessionRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -45,12 +46,14 @@ class PresenceUpdateServiceTest {
         long userId = 1L;
         long sessionId = 27L;
         WalkSession session = ownedDistanceSession(userId);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         PresenceUpdateService service = new PresenceUpdateService(
                 walkSessionRepository,
                 presenceRepository,
-                presenceLocationStore
+                presenceLocationStore,
+                new PresenceMetrics(registry)
         );
-        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
         when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
         when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
         when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
@@ -74,7 +77,15 @@ class PresenceUpdateServiceTest {
         assertThat(response.nearby().getFirst().directionOctant()).isEqualTo(0);
         assertThat(response.nearby().getFirst().directionReference()).isEqualTo("HEADING");
         assertThat(response.nearby().getFirst().trend()).isEqualTo("APPROACHING");
+        assertThat(registry.get("mungroute.presence.stage").tag("stage", "redis_geo_search")
+                .timer().count()).isEqualTo(1);
+        assertThat(registry.get("mungroute.presence.stage").tag("stage", "redis_distance_history")
+                .timer().count()).isEqualTo(1);
+        assertThat(registry.get("mungroute.presence.stage").tag("stage", "db_notification")
+                .timer().count()).isEqualTo(1);
         verify(presenceLocationStore).update(any(PresenceLocation.class));
+        verify(presenceLocationStore).cacheSession(
+                new com.mungroute.proximity.store.PresenceSessionState(sessionId, userId, "distance"));
         verify(presenceRepository).recordProximityNotification(
                 eq(sessionId), eq(28L), eq("BAND_30_50"), eq(0), eq(45), eq("APPROACHING"), any());
     }
@@ -85,8 +96,9 @@ class PresenceUpdateServiceTest {
         long sessionId = 27L;
         WalkSession session = ownedDistanceSession(userId);
         PresenceUpdateService service = new PresenceUpdateService(
-                walkSessionRepository, presenceRepository, presenceLocationStore);
-        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+                walkSessionRepository, presenceRepository, presenceLocationStore,
+                new PresenceMetrics(new SimpleMeterRegistry()));
+        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
         when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
         when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
         when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
@@ -112,7 +124,8 @@ class PresenceUpdateServiceTest {
         PresenceUpdateService service = new PresenceUpdateService(
                 walkSessionRepository,
                 presenceRepository,
-                presenceLocationStore
+                presenceLocationStore,
+                new PresenceMetrics(new SimpleMeterRegistry())
         );
         assertThatThrownBy(() -> service.update(
                 userId,
