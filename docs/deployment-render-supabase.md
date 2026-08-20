@@ -41,6 +41,9 @@ Supabase의 `postgresql://...` 문자열을 그대로 넣지 말고 Spring JDBC�
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 실제 프런트엔드 origin, 예: `https://mungroute.example.com` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | 위 Supabase 값 |
 | `REDIS_URL` | 위 Redis 값 |
+| `KMA_API_HUB_AUTH_KEY` | 기상청 API허브에서 발급한 인증키 |
+
+`KMA_API_HUB_AUTH_KEY`가 없거나 ASOS 호출에 실패하면 코스 온도는 기존 기준일 시나리오로 자동 fallback한다. 기본 관측소는 서울 ASOS 108번이며 `KMA_ASOS_STATION_ID`로 변경할 수 있다.
 
 `PORT`는 Render가 자동 주입하며 애플리케이션이 이를 사용한다.
 

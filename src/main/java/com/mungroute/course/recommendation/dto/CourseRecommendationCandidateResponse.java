@@ -19,6 +19,7 @@ public record CourseRecommendationCandidateResponse(
         boolean withinTargetTime,
         boolean shadeApplicable,
         int referenceHour,
+        String weatherSource,
         JsonNode route,
         List<Long> segmentIds,
         List<CourseRecommendationThermalSegmentResponse> thermalSegments,

@@ -55,6 +55,15 @@ course:
     max-swapped-sections: 2
 
 external:
+  kma:
+    asos:
+      base-url: ${KMA_ASOS_BASE_URL:https://apihub.kma.go.kr}
+      auth-key: ${KMA_API_HUB_AUTH_KEY:}
+      station-id: ${KMA_ASOS_STATION_ID:108}
+      cache-ttl: ${KMA_ASOS_CACHE_TTL:10m}
+      stale-ttl: ${KMA_ASOS_STALE_TTL:2h}
+      retry-delay: ${KMA_ASOS_RETRY_DELAY:1m}
+      live-request-window: ${KMA_ASOS_LIVE_REQUEST_WINDOW:90m}
   food-safety:
     pet-restaurants:
       export-url: ${FOOD_SAFETY_PET_RESTAURANTS_EXPORT_URL:https://www.foodsafetykorea.go.kr/portal/petKorea/downloadExcel.do}

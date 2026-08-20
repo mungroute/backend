@@ -15,8 +15,18 @@ public record CourseDiagnosticSegmentRow(
         String surfaceType,
         BigDecimal svf,
         BigDecimal albedo,
+        BigDecimal emissivity,
+        BigDecimal groundFluxRatio,
         BigDecimal parkProximityM,
         String thermalModelConfidence,
         LocalDate thermalWeatherDate
 ) {
+    public CourseDiagnosticSegmentRow withThermal(BigDecimal temperature, LocalDate weatherDate) {
+        return new CourseDiagnosticSegmentRow(
+                sequence, segmentId, lengthM, routeGeoJson, temperature,
+                shadeRatio, treeShadeRatio, buildingShadeRatio, surfaceType,
+                svf, albedo, emissivity, groundFluxRatio, parkProximityM,
+                thermalModelConfidence, weatherDate
+        );
+    }
 }
