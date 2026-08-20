@@ -19,3 +19,8 @@ spring:
       url: ${REDIS_URL}
       connect-timeout: 2s
       timeout: 2s
+
+security:
+  jwt:
+    cookie-secure: ${JWT_COOKIE_SECURE:true}
+    cookie-same-site: ${JWT_COOKIE_SAME_SITE:None}

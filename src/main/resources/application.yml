@@ -31,6 +31,7 @@ security:
     access-token-ttl: 30m
     refresh-token-ttl: 14d
     cookie-secure: ${JWT_COOKIE_SECURE:false}
+    cookie-same-site: ${JWT_COOKIE_SAME_SITE:Lax}
   password-reset:
     verification-ttl: 10m
     reset-token-ttl: 10m
