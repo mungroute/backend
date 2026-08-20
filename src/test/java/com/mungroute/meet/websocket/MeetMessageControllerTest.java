@@ -34,7 +34,7 @@ class MeetMessageControllerTest {
         var authentication = new UserPrincipalJwtAuthenticationToken(jwt, user);
         var request = new PresenceUpdateRequest(27L, OffsetDateTime.now(), new BigDecimal("126.978"),
                 new BigDecimal("37.5665"), new BigDecimal("7"), null, false, 100);
-        var expected = new MeetPresenceResponse(27L, OffsetDateTime.now(), 4, List.of(), null);
+        var expected = new MeetPresenceResponse(27L, OffsetDateTime.now(), 4, 100, List.of(), null);
         when(service.update(7L, request)).thenReturn(expected);
 
         assertThat(controller.update(request, authentication)).isSameAs(expected);

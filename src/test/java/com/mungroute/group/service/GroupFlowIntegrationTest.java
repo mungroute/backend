@@ -58,6 +58,14 @@ class GroupFlowIntegrationTest {
                 "SELECT COUNT(*) FROM custom_course WHERE custom_course_id = ? AND user_id = ?",
                 Integer.class, saved.courseId(), memberId
         )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT course_name FROM custom_course WHERE custom_course_id = ?",
+                String.class, saved.courseId()
+        )).endsWith(" (그룹)").doesNotEndWith(" (그룹) (그룹)");
+        assertThatThrownBy(() -> groupService.shareCourse(
+                memberId, group.groupId(), new ShareCourseRequest("custom", saved.courseId()), REQUESTED_AT
+        )).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(GroupErrorCode.GROUP_SAVED_COURSE_RESHARE_NOT_ALLOWED));
         assertThat(groupService.activities(memberId, group.groupId(), null, 20))
                 .extracting("activityType")
                 .contains("GROUP_CREATED", "MEMBER_JOINED", "COURSE_SHARED", "COURSE_SAVED");

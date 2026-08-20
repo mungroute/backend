@@ -37,7 +37,9 @@ class MeetPresenceServiceTest {
         when(locationStore.findSession(10L)).thenReturn(Optional.of(new PresenceSessionState(10L, 1L, "meet")));
         when(meetRepository.findAcceptedForSession(10L)).thenReturn(Optional.empty());
         when(locationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt())).thenReturn(List.of(
-                new NearbyPresenceLocation(20L, 2L, "meet", 126.9781, 37.5666, 7)
+                new NearbyPresenceLocation(20L, 2L, "meet", 126.9781, 37.5666, 7),
+                new NearbyPresenceLocation(30L, 3L, "distance", 126.9781, 37.5666, 7),
+                new NearbyPresenceLocation(40L, 4L, "off", 126.9781, 37.5666, 7)
         ));
         when(locationStore.issueMeetCandidateRef(10L, 20L, 2L)).thenReturn("opaque-random-reference");
         when(meetRepository.findProfile(2L)).thenReturn(Optional.of(profile(2L, "쿠키")));
@@ -45,6 +47,7 @@ class MeetPresenceServiceTest {
         var response = service.update(1L, request(10L));
 
         assertThat(response.connection()).isNull();
+        assertThat(response.radiusM()).isEqualTo(100);
         assertThat(response.candidates()).hasSize(1);
         assertThat(response.candidates().getFirst().candidateRef()).isEqualTo("opaque-random-reference");
         assertThat(response.candidates().getFirst().distanceBand()).isNotBlank();

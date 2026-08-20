@@ -2,6 +2,7 @@ package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.proximity.repository.PresenceRepository;
+import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.meet.service.MeetService;
 import tools.jackson.databind.ObjectMapper;
@@ -17,6 +18,7 @@ import com.mungroute.walk.dto.request.AddWalkPointRequest;
 import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.dto.request.StartWalkRequest;
 import com.mungroute.walk.dto.response.ChangeWalkModeResponse;
+import com.mungroute.walk.dto.response.ActiveWalkStateResponse;
 import com.mungroute.walk.dto.response.EndWalkResponse;
 import com.mungroute.walk.dto.response.StartWalkResponse;
 import com.mungroute.walk.exception.WalkErrorCode;
@@ -27,6 +29,7 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
 
 @Service
 public class WalkSessionService {
@@ -158,6 +161,53 @@ public class WalkSessionService {
                 request.lon(),
                 request.lat(),
                 request.accuracy()
+        );
+
+        // General walks do not open a presence WebSocket or receive nearby results,
+        // but distance-mode walkers still need to be warned about them. Reuse the
+        // already-uploaded walk fix as a short-lived, one-way safety presence.
+        // Distance and meet modes keep their existing richer WebSocket updates so
+        // this path must not duplicate those Redis writes.
+        if (walkSession.getMode() == WalkMode.OFF) {
+            presenceLocationStore.update(new PresenceLocation(
+                    walkSession.getSessionId(),
+                    userId,
+                    WalkMode.OFF.getValue(),
+                    request.lon(),
+                    request.lat(),
+                    request.accuracy().doubleValue(),
+                    null,
+                    false,
+                    receivedAt
+            ));
+        }
+    }
+
+    @Transactional
+    public ActiveWalkStateResponse activeState(Long userId, Long sessionId) {
+        WalkSession session = walkSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
+        validateOwner(session, userId);
+
+        OffsetDateTime measuredUntil = session.getEndedAt() == null
+                ? OffsetDateTime.now()
+                : session.getEndedAt();
+        long elapsedSeconds = Math.max(0, Duration.between(session.getStartedAt(), measuredUntil).toSeconds());
+        elapsedSeconds -= session.getPausedDurationSec();
+        if (session.getPausedAt() != null) {
+            elapsedSeconds -= Math.max(0, Duration.between(session.getPausedAt(), measuredUntil).toSeconds());
+        }
+        String status = session.getEndedAt() != null
+                ? "ENDED"
+                : session.isPaused() ? "PAUSED" : "ACTIVE";
+        return new ActiveWalkStateResponse(
+                sessionId,
+                status,
+                session.getStartedAt(),
+                Math.toIntExact(Math.min(Integer.MAX_VALUE, Math.max(0, elapsedSeconds))),
+                walkTrackPointRepository.calculateLiveDistanceM(sessionId),
+                session.getMode().getValue(),
+                session.getLockedMode() == null ? null : session.getLockedMode().getValue()
         );
     }
 

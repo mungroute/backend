@@ -144,6 +144,20 @@ class GroupServiceTest {
     }
 
     @Test
+    void blocksResharingACourseThatWasSavedFromAGroup() {
+        when(groupRepository.findForMember(2L, 10L)).thenReturn(Optional.of(group("MEMBER")));
+        when(courseCatalogService.detail(2L, "custom", 7L, NOW)).thenReturn(course(7L));
+        when(groupRepository.isGroupSavedCourse(7L)).thenReturn(true);
+
+        assertThatThrownBy(() -> groupService.shareCourse(
+                2L, 10L, new ShareCourseRequest("CUSTOM", 7L), NOW
+        )).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(GroupErrorCode.GROUP_SAVED_COURSE_RESHARE_NOT_ALLOWED));
+
+        verify(groupRepository, never()).shareCourse(anyLong(), anyLong(), any(), anyLong());
+    }
+
+    @Test
     void issuesSixCharacterInviteAndRevokesThePreviousOne() {
         when(groupRepository.findForMember(1L, 10L)).thenReturn(Optional.of(group("OWNER")));
         when(groupRepository.createInvite(eq(10L), eq(1L), any(), any())).thenReturn(1L);

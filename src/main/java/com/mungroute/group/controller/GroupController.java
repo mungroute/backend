@@ -12,6 +12,7 @@ import com.mungroute.group.dto.response.GroupSummaryResponse;
 import com.mungroute.group.dto.response.InviteCodeResponse;
 import com.mungroute.group.dto.response.SavedSharedCourseResponse;
 import com.mungroute.group.service.GroupService;
+import com.mungroute.group.websocket.GroupCourseEventPublisher;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -39,9 +40,11 @@ import java.util.List;
 @RequestMapping("/api/groups")
 public class GroupController {
     private final GroupService groupService;
+    private final GroupCourseEventPublisher courseEventPublisher;
 
-    public GroupController(GroupService groupService) {
+    public GroupController(GroupService groupService, GroupCourseEventPublisher courseEventPublisher) {
         this.groupService = groupService;
+        this.courseEventPublisher = courseEventPublisher;
     }
 
     @GetMapping
@@ -170,6 +173,7 @@ public class GroupController {
         GroupSharedCourseResponse response = groupService.shareCourse(
                 principal.userId(), groupId, request, requestedAt
         );
+        courseEventPublisher.courseShared(groupId, response.sharedCourseId());
         return ResponseEntity.created(URI.create(
                 "/api/groups/" + groupId + "/courses/" + response.sharedCourseId()
         )).body(response);
@@ -194,6 +198,7 @@ public class GroupController {
             @PathVariable @Positive long sharedCourseId
     ) {
         groupService.unshareCourse(principal.userId(), groupId, sharedCourseId);
+        courseEventPublisher.courseUnshared(groupId, sharedCourseId);
         return ResponseEntity.noContent().build();
     }
 

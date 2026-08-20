@@ -42,7 +42,7 @@ class PresenceUpdateServiceTest {
     PresenceLocationStore presenceLocationStore;
 
     @Test
-    void updatesRedisAndReturnsOnlyCoarseApproachInformation() {
+    void distanceModeReturnsCoarseApproachInformationForEveryWalkMode() {
         long userId = 1L;
         long sessionId = 27L;
         WalkSession session = ownedDistanceSession(userId);
@@ -62,27 +62,29 @@ class PresenceUpdateServiceTest {
                 .thenReturn(List.of(
                         new NearbyPresenceLocation(28L, 2L, "distance", 126.978, 37.5669, 7),
                         new NearbyPresenceLocation(29L, userId, "distance", 126.978, 37.5668, 7),
-                        new NearbyPresenceLocation(30L, 3L, "meet", 126.978, 37.5667, 7)
+                        new NearbyPresenceLocation(30L, 3L, "meet", 126.978, 37.5667, 7),
+                        new NearbyPresenceLocation(31L, 4L, "off", 126.978, 37.5666, 7)
                 ));
         when(presenceLocationStore.appendDistanceHistory(any(Long.class), any(Long.class), any(Double.class)))
                 .thenReturn(List.of(60.0, 52.0, 44.0));
-        when(presenceLocationStore.synchronizeNearbySessions(sessionId, List.of(28L)))
-                .thenReturn(new NearbyPresenceTransition(List.of(28L), List.of()));
+        when(presenceLocationStore.synchronizeNearbySessions(sessionId, List.of(31L, 30L, 28L)))
+                .thenReturn(new NearbyPresenceTransition(List.of(31L, 30L, 28L), List.of()));
 
         var response = service.update(userId, request(sessionId, OffsetDateTime.now()));
 
         assertThat(response.nextUpdateAfterSeconds()).isEqualTo(4);
-        assertThat(response.nearby()).hasSize(1);
-        assertThat(response.nearby().getFirst().distanceBand()).isEqualTo("BAND_30_50");
-        assertThat(response.nearby().getFirst().directionOctant()).isEqualTo(0);
-        assertThat(response.nearby().getFirst().directionReference()).isEqualTo("HEADING");
-        assertThat(response.nearby().getFirst().trend()).isEqualTo("APPROACHING");
+        assertThat(response.nearby()).hasSize(3);
+        assertThat(response.nearby()).extracting(item -> item.distanceBand())
+                .containsExactly("VERY_CLOSE", "VERY_CLOSE", "BAND_30_50");
+        assertThat(response.nearby().getLast().directionOctant()).isEqualTo(0);
+        assertThat(response.nearby().getLast().directionReference()).isEqualTo("HEADING");
+        assertThat(response.nearby()).allMatch(item -> item.trend().equals("APPROACHING"));
         assertThat(registry.get("mungroute.presence.stage").tag("stage", "redis_geo_search")
                 .timer().count()).isEqualTo(1);
         assertThat(registry.get("mungroute.presence.stage").tag("stage", "redis_distance_history")
-                .timer().count()).isEqualTo(1);
+                .timer().count()).isEqualTo(3);
         assertThat(registry.get("mungroute.presence.stage").tag("stage", "db_notification")
-                .timer().count()).isEqualTo(1);
+                .timer().count()).isEqualTo(3);
         verify(presenceLocationStore).update(any(PresenceLocation.class));
         verify(presenceLocationStore).cacheSession(
                 new com.mungroute.proximity.store.PresenceSessionState(sessionId, userId, "distance"));

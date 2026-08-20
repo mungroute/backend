@@ -236,6 +236,24 @@ public class JdbcGroupRepository implements GroupRepository {
     }
 
     @Override
+    public boolean isCourseShared(String source, long courseId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM group_shared_course WHERE course_source = ? AND course_id = ?",
+                Integer.class, source, courseId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean isGroupSavedCourse(long customCourseId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM group_course_save WHERE saved_course_id = ?",
+                Integer.class, customCourseId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
     public Optional<SharedCourseRow> findSharedCourse(long groupId, long sharedCourseId) {
         return sharedCourseQuery("WHERE shared.group_id = ? AND shared.shared_course_id = ?", groupId, sharedCourseId)
                 .stream().findFirst();
@@ -297,7 +315,9 @@ public class JdbcGroupRepository implements GroupRepository {
                     reference_hour, thermal_weather_date, thermal_model_confidence,
                     is_loop, is_representative
                 )
-                SELECT ?, left(source.course_name || ' (그룹)', 100), source.waypoints,
+                SELECT ?, left(rtrim(regexp_replace(
+                           source.course_name, '([[:space:]]*[(]그룹[)])+$', ''
+                       )) || ' (그룹)', 100), source.waypoints,
                        source.segment_ids, source.segment_lengths_m, source.geom,
                        source.length_m, source.duration_min, source.shade_ratio,
                        source.estimated_surface_temp_c, source.reference_hour,
@@ -320,7 +340,10 @@ public class JdbcGroupRepository implements GroupRepository {
                     reference_hour, thermal_weather_date, thermal_model_confidence,
                     is_loop, is_representative
                 )
-                SELECT ?, left(COALESCE(session.course_name, '산책 코스') || ' (그룹)', 100),
+                SELECT ?, left(rtrim(regexp_replace(
+                           COALESCE(session.course_name, '산책 코스'),
+                           '([[:space:]]*[(]그룹[)])+$', ''
+                       )) || ' (그룹)', 100),
                        jsonb_build_array(
                            jsonb_build_object('snapped', jsonb_build_object(
                                'lat', ST_Y(ST_Transform(ST_StartPoint(session.track_geom), 4326)),

@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 import static com.mungroute.proximity.service.PresenceMetrics.Stage.CLASSIFICATION;
 import static com.mungroute.proximity.service.PresenceMetrics.Stage.DB_END_EVENTS;
@@ -36,6 +37,11 @@ public class PresenceUpdateService {
     private static final int REDIS_CANDIDATE_LIMIT = 6;
     private static final int RESPONSE_LIMIT = 3;
     private static final int CANDIDATE_ACCURACY_BUFFER_METERS = 50;
+    private static final Set<String> SAFETY_VISIBLE_MODES = Set.of(
+            WalkMode.OFF.getValue(),
+            WalkMode.DISTANCE.getValue(),
+            WalkMode.MEET.getValue()
+    );
     private final WalkSessionRepository walkSessionRepository;
     private final PresenceRepository presenceRepository;
     private final PresenceLocationStore presenceLocationStore;
@@ -80,7 +86,7 @@ public class PresenceUpdateService {
                 ));
         List<ClassifiedPresence> classifiedNearby = metrics.record(CLASSIFICATION, () -> nearbyCandidates.stream()
                 .filter(candidate -> candidate.userId() != userId)
-                .filter(candidate -> WalkMode.DISTANCE.getValue().equals(candidate.mode()))
+                .filter(candidate -> SAFETY_VISIBLE_MODES.contains(candidate.mode()))
                 .map(candidate -> classify(origin, candidate, request.radiusM()))
                 .filter(candidate -> candidate != null)
                 .sorted(Comparator.comparingInt(ClassifiedPresence::sortDistanceMeters))
