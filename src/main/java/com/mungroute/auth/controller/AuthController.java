@@ -125,11 +125,12 @@ public class AuthController {
 
     private ResponseCookie refreshCookie(String value) {
         return ResponseCookie.from(REFRESH_COOKIE, value).httpOnly(true).secure(jwtProperties.cookieSecure())
-                .sameSite("Lax").path("/api/auth").maxAge(jwtProperties.refreshTokenTtl()).build();
+                .sameSite(jwtProperties.cookieSameSite()).path("/api/auth")
+                .maxAge(jwtProperties.refreshTokenTtl()).build();
     }
 
     private ResponseCookie clearRefreshCookie() {
         return ResponseCookie.from(REFRESH_COOKIE, "").httpOnly(true).secure(jwtProperties.cookieSecure())
-                .sameSite("Lax").path("/api/auth").maxAge(Duration.ZERO).build();
+                .sameSite(jwtProperties.cookieSameSite()).path("/api/auth").maxAge(Duration.ZERO).build();
     }
 }

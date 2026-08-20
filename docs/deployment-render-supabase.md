@@ -37,6 +37,7 @@ Supabase의 `postgresql://...` 문자열을 그대로 넣지 말고 Spring JDBC�
 | `SPRING_PROFILES_ACTIVE` | `prod` |
 | `JWT_SECRET` | 32바이트 이상의 무작위 비밀값 |
 | `JWT_COOKIE_SECURE` | `true` |
+| `JWT_COOKIE_SAME_SITE` | `None` |
 | `PASSWORD_RESET_EXPOSE_CODE` | `false` |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 실제 프런트엔드 origin, 예: `https://mungroute.example.com` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | 위 Supabase 값 |
