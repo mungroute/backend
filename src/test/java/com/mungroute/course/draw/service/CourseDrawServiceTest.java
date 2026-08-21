@@ -34,6 +34,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 
 @ExtendWith(MockitoExtension.class)
 class CourseDrawServiceTest {
@@ -112,8 +113,96 @@ class CourseDrawServiceTest {
         assertThat(response.cumulative().estimatedSurfaceTempC()).isEqualByComparingTo("31.20");
     }
 
+    @Test
+    void removesAnAutomaticallySnappedIntermediatePointThatCreatesABacktrackingSpur() {
+        DrawWaypointRequest start = waypoint(1L, 101L, 37.5665, 126.9780, false);
+        DrawWaypointRequest fallback = waypoint(2L, 102L, 37.5666, 126.9782, true);
+        DrawWaypointRequest end = waypoint(3L, 103L, 37.5667, 126.9784, false);
+        Instant requestedAt = Instant.parse("2026-08-15T06:00:00Z");
+
+        when(courseDrawRepository.findShortestWalkablePath(any(NetworkWaypoint.class), any(NetworkWaypoint.class)))
+                .thenAnswer(invocation -> {
+                    NetworkWaypoint from = invocation.getArgument(0);
+                    NetworkWaypoint to = invocation.getArgument(1);
+                    if (from.segmentId() == 101L && to.segmentId() == 102L) {
+                        return Optional.of(path(
+                                new long[]{501L, 502L},
+                                new String[]{"30.0", "20.0"},
+                                start, fallback
+                        ));
+                    }
+                    if (from.segmentId() == 102L && to.segmentId() == 103L) {
+                        return Optional.of(path(
+                                new long[]{502L, 503L},
+                                new String[]{"20.0", "30.0"},
+                                fallback, end
+                        ));
+                    }
+                    if (from.segmentId() == 101L && to.segmentId() == 103L) {
+                        return Optional.of(path(
+                                new long[]{504L},
+                                new String[]{"45.0"},
+                                start, end
+                        ));
+                    }
+                    return Optional.empty();
+                });
+        when(courseDrawRepository.allSegmentsWalkable(List.of(504L))).thenReturn(true);
+        when(courseRoutingRepository.findSegmentsInOrder(List.of(504L), ThermalReferenceTime.H15))
+                .thenReturn(List.of(new CourseSegmentData(
+                        504L, 1L, 3L, new BigDecimal("45.0"), new BigDecimal("0.420"),
+                        new BigDecimal("36.20"), "MEDIUM", LocalDate.of(2026, 8, 11)
+                )));
+        when(metricsCalculator.calculate(any(), any(CourseCalculationContext.class))).thenReturn(new CourseMetrics(
+                new BigDecimal("45.0"), 1, new BigDecimal("0.420"), new BigDecimal("36.20"),
+                "REFERENCE", LocalDate.of(2026, 8, 11), "MEDIUM"
+        ));
+        when(solarPositionService.resolve(any(Instant.class), anyDouble(), anyDouble()))
+                .thenReturn(new CourseCalculationContext(
+                        requestedAt, ThermalReferenceTime.H15, SolarState.DAYLIGHT, 54.0
+                ));
+
+        var response = courseDrawService.connect(new ConnectCourseRequest(
+                List.of(start, fallback, end),
+                requestedAt
+        ));
+
+        assertThat(response.ignoredWaypointIndexes()).containsExactly(1);
+        assertThat(response.segmentIds()).containsExactly(504L);
+        assertThat(response.cumulative().lengthM()).isEqualByComparingTo("45.0");
+    }
+
     private DrawWaypointRequest waypoint(long nodeId, long segmentId, double lat, double lon) {
+        return waypoint(nodeId, segmentId, lat, lon, false);
+    }
+
+    private DrawWaypointRequest waypoint(
+            long nodeId,
+            long segmentId,
+            double lat,
+            double lon,
+            boolean fallbackApplied
+    ) {
         DrawPointRequest point = new DrawPointRequest(lat, lon);
-        return new DrawWaypointRequest(point, point, nodeId, segmentId, false);
+        return new DrawWaypointRequest(point, point, nodeId, segmentId, fallbackApplied);
+    }
+
+    private ConnectedWalkablePath path(
+            long[] segmentIds,
+            String[] lengths,
+            DrawWaypointRequest start,
+            DrawWaypointRequest end
+    ) {
+        List<TraversedWalkableSegment> traversals = new java.util.ArrayList<>();
+        for (int index = 0; index < segmentIds.length; index++) {
+            traversals.add(new TraversedWalkableSegment(segmentIds[index], new BigDecimal(lengths[index])));
+        }
+        return new ConnectedWalkablePath(
+                traversals,
+                List.of(
+                        new GeoPointResponse(start.snapped().lat(), start.snapped().lon()),
+                        new GeoPointResponse(end.snapped().lat(), end.snapped().lon())
+                )
+        );
     }
 }

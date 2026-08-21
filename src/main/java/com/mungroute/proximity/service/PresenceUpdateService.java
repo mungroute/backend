@@ -34,7 +34,8 @@ import static com.mungroute.proximity.service.PresenceMetrics.Stage.SESSION_VALI
 @Service
 public class PresenceUpdateService {
 
-    private static final int REDIS_CANDIDATE_LIMIT = 6;
+    private static final int REDIS_CANDIDATE_LIMIT = 101;
+    private static final int RISK_EVALUATION_LIMIT = 12;
     private static final int RESPONSE_LIMIT = 3;
     private static final int CANDIDATE_ACCURACY_BUFFER_METERS = 50;
     private static final Set<String> SAFETY_VISIBLE_MODES = Set.of(
@@ -84,19 +85,26 @@ public class PresenceUpdateService {
                     request.radiusM() + CANDIDATE_ACCURACY_BUFFER_METERS,
                     REDIS_CANDIDATE_LIMIT
                 ));
-        List<ClassifiedPresence> classifiedNearby = metrics.record(CLASSIFICATION, () -> nearbyCandidates.stream()
+        List<ClassifiedPresence> classifiedCandidates = metrics.record(CLASSIFICATION, () -> nearbyCandidates.stream()
                 .filter(candidate -> candidate.userId() != userId)
                 .filter(candidate -> SAFETY_VISIBLE_MODES.contains(candidate.mode()))
                 .map(candidate -> classify(origin, candidate, request.radiusM()))
                 .filter(candidate -> candidate != null)
-                .sorted(Comparator.comparingInt(ClassifiedPresence::sortDistanceMeters))
-                .limit(RESPONSE_LIMIT)
+                .sorted(Comparator
+                        .comparingInt(ClassifiedPresence::immediateRiskPriority)
+                        .thenComparingInt(ClassifiedPresence::sortDistanceMeters))
                 .toList());
-        classifiedNearby = classifiedNearby.stream()
+        int nearbyCount = classifiedCandidates.size();
+        List<ClassifiedPresence> classifiedNearby = classifiedCandidates.stream()
+                .limit(RISK_EVALUATION_LIMIT)
                 .map(candidate -> candidate.withTrend(metrics.record(REDIS_DISTANCE_HISTORY,
                         () -> presenceLocationStore.appendDistanceHistory(
                                 origin.sessionId(), candidate.otherSessionId(), candidate.distanceMeters()
                         ))))
+                .sorted(Comparator
+                        .comparingInt(ClassifiedPresence::riskPriority)
+                        .thenComparingInt(ClassifiedPresence::sortDistanceMeters))
+                .limit(RESPONSE_LIMIT)
                 .toList();
 
         List<ClassifiedPresence> finalClassifiedNearby = classifiedNearby;
@@ -123,6 +131,7 @@ public class PresenceUpdateService {
                 updatedAt,
                 request.stationary() ? 10 : 4,
                 nearby,
+                nearbyCount,
                 request.clientMessageId()
         );
     }
@@ -220,10 +229,18 @@ public class PresenceUpdateService {
                 reference,
                 "NEW"
         );
+        boolean likelyApproaching = isHeadingToward(
+                origin.headingDegrees(), origin.stationary(),
+                bearingDegrees(origin.latitude(), origin.longitude(), candidate.latitude(), candidate.longitude())
+        ) || isHeadingToward(
+                candidate.headingDegrees(), candidate.stationary(),
+                bearingDegrees(candidate.latitude(), candidate.longitude(), origin.latitude(), origin.longitude())
+        );
         return new ClassifiedPresence(
                 (int) Math.round(distanceMeters),
                 candidate.sessionId(),
                 distanceMeters,
+                likelyApproaching,
                 response
         );
     }
@@ -271,6 +288,12 @@ public class PresenceUpdateService {
         return (degrees % 360 + 360) % 360;
     }
 
+    private static boolean isHeadingToward(Double heading, boolean stationary, double targetBearing) {
+        if (stationary || heading == null) return false;
+        double delta = Math.abs((normalizeDegrees(targetBearing) - normalizeDegrees(heading) + 540) % 360 - 180);
+        return delta <= 67.5;
+    }
+
     private static String distanceBand(double distanceMeters) {
         if (distanceMeters < 30) return "VERY_CLOSE";
         if (distanceMeters < 50) return "BAND_30_50";
@@ -290,13 +313,37 @@ public class PresenceUpdateService {
             int sortDistanceMeters,
             long otherSessionId,
             double distanceMeters,
+            boolean likelyApproaching,
             NearbyPresenceResponse response
     ) {
+        int immediateRiskPriority() {
+            if ("VERY_CLOSE".equals(response.distanceBand())) return 0;
+            if (likelyApproaching) return 1;
+            return switch (response.distanceBand()) {
+                case "BAND_30_50" -> 2;
+                case "BAND_50_100" -> 3;
+                default -> 4;
+            };
+        }
+
+        int riskPriority() {
+            if ("VERY_CLOSE".equals(response.distanceBand())) return 0;
+            if ("APPROACHING".equals(response.trend())) return 1;
+            if (likelyApproaching) return 2;
+            return switch (response.trend()) {
+                case "NEW" -> 3;
+                case "STEADY" -> 4;
+                case "LEAVING" -> 5;
+                default -> 6;
+            };
+        }
+
         ClassifiedPresence withTrend(List<Double> history) {
             return new ClassifiedPresence(
                     sortDistanceMeters,
                     otherSessionId,
                     distanceMeters,
+                    likelyApproaching,
                     new NearbyPresenceResponse(
                             response.distanceBand(),
                             response.directionOctant(),

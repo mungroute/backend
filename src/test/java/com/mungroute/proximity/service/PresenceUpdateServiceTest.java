@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -73,6 +74,7 @@ class PresenceUpdateServiceTest {
         var response = service.update(userId, request(sessionId, OffsetDateTime.now()));
 
         assertThat(response.nextUpdateAfterSeconds()).isEqualTo(4);
+        assertThat(response.nearbyCount()).isEqualTo(3);
         assertThat(response.nearby()).hasSize(3);
         assertThat(response.nearby()).extracting(item -> item.distanceBand())
                 .containsExactly("VERY_CLOSE", "VERY_CLOSE", "BAND_30_50");
@@ -90,6 +92,46 @@ class PresenceUpdateServiceTest {
                 new com.mungroute.proximity.store.PresenceSessionState(sessionId, userId, "distance"));
         verify(presenceRepository).recordProximityNotification(
                 eq(sessionId), eq(28L), eq("BAND_30_50"), eq(0), eq(45), eq("APPROACHING"), any());
+    }
+
+    @Test
+    void prioritizesImmediateDangerAndApproachingWalkersAndReportsTheCrowdSize() {
+        long userId = 1L;
+        long sessionId = 27L;
+        PresenceUpdateService service = new PresenceUpdateService(
+                walkSessionRepository, presenceRepository, presenceLocationStore,
+                new PresenceMetrics(new SimpleMeterRegistry()));
+        WalkSession session = ownedDistanceSession(userId);
+        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+        when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
+        when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
+        when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
+                .thenReturn(1);
+        when(presenceLocationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt()))
+                .thenReturn(List.of(
+                        new NearbyPresenceLocation(28L, 2L, "distance", 126.978, 37.5666, 7),
+                        new NearbyPresenceLocation(29L, 3L, "distance", 126.978, 37.5668, 7),
+                        new NearbyPresenceLocation(30L, 4L, "distance", 126.978, 37.56713, 7),
+                        new NearbyPresenceLocation(31L, 5L, "distance", 126.978, 37.56731, 7)
+                ));
+        when(presenceLocationStore.appendDistanceHistory(eq(sessionId), eq(28L), anyDouble()))
+                .thenReturn(List.of(10.0, 18.0));
+        when(presenceLocationStore.appendDistanceHistory(eq(sessionId), eq(29L), anyDouble()))
+                .thenReturn(List.of(34.0, 34.0));
+        when(presenceLocationStore.appendDistanceHistory(eq(sessionId), eq(30L), anyDouble()))
+                .thenReturn(List.of(82.0, 70.0));
+        when(presenceLocationStore.appendDistanceHistory(eq(sessionId), eq(31L), anyDouble()))
+                .thenReturn(List.of(80.0, 90.0));
+        when(presenceLocationStore.synchronizeNearbySessions(sessionId, List.of(28L, 30L, 29L)))
+                .thenReturn(new NearbyPresenceTransition(List.of(), List.of()));
+
+        var response = service.update(userId, request(sessionId, OffsetDateTime.now()));
+
+        assertThat(response.nearbyCount()).isEqualTo(4);
+        assertThat(response.nearby()).extracting(item -> item.trend())
+                .containsExactly("LEAVING", "APPROACHING", "STEADY");
+        assertThat(response.nearby()).extracting(item -> item.distanceBand())
+                .containsExactly("VERY_CLOSE", "BAND_50_100", "BAND_30_50");
     }
 
     @Test

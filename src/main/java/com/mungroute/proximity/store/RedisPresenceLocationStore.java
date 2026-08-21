@@ -177,7 +177,9 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
                         metadata.mode(),
                         candidate.point().getX(),
                         candidate.point().getY(),
-                        metadata.accuracy()
+                        metadata.accuracy(),
+                        metadata.heading(),
+                        metadata.stationary()
                 ));
             } catch (RuntimeException ignored) {
                 invalidMembers.add(candidate.member());

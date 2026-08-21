@@ -6,11 +6,13 @@ public record ConnectCourseResponse(
         List<Long> addedSegmentIds,
         List<Long> segmentIds,
         List<GeoPointResponse> coordinates,
-        CourseDrawMetricsResponse cumulative
+        CourseDrawMetricsResponse cumulative,
+        List<Integer> ignoredWaypointIndexes
 ) {
     public ConnectCourseResponse {
         addedSegmentIds = List.copyOf(addedSegmentIds);
         segmentIds = List.copyOf(segmentIds);
         coordinates = List.copyOf(coordinates);
+        ignoredWaypointIndexes = List.copyOf(ignoredWaypointIndexes);
     }
 }
