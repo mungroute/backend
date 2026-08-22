@@ -1,8 +1,10 @@
 package com.mungroute.weather.service;
 
 import com.mungroute.weather.client.AsosWeatherGateway;
+import com.mungroute.weather.client.ForecastWeatherGateway;
 import com.mungroute.weather.config.KmaAsosProperties;
 import com.mungroute.weather.domain.AsosObservation;
+import com.mungroute.weather.domain.ForecastWeather;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -58,6 +60,95 @@ class LiveWeatherServiceTest {
         LiveWeatherService service = new LiveWeatherService(gateway, properties(), clock);
 
         assertThat(service.resolve(Instant.parse("2026-08-11T06:00:00Z"))).isEmpty();
+    }
+
+    @Test
+    void usesTodaysHourlyAsosObservationForAPastReferenceHour() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-21T06:20:00Z"));
+        AtomicInteger latestCalls = new AtomicInteger();
+        AtomicInteger hourlyCalls = new AtomicInteger();
+        AsosWeatherGateway gateway = new AsosWeatherGateway() {
+            @Override
+            public AsosObservation fetchLatest() {
+                latestCalls.incrementAndGet();
+                return observation(clock.instant());
+            }
+
+            @Override
+            public AsosObservation fetchAt(Instant requestedAt) {
+                hourlyCalls.incrementAndGet();
+                return observation(requestedAt);
+            }
+
+            @Override
+            public boolean configured() {
+                return true;
+            }
+        };
+        LiveWeatherService service = new LiveWeatherService(gateway, properties(), clock);
+
+        var result = service.resolve(Instant.parse("2026-08-21T03:00:00Z"));
+
+        assertThat(result).get().extracting("source").isEqualTo("OBSERVED");
+        assertThat(result).get().extracting("observedAt").isEqualTo(Instant.parse("2026-08-21T03:00:00Z"));
+        assertThat(hourlyCalls).hasValue(1);
+        assertThat(latestCalls).hasValue(0);
+    }
+
+    @Test
+    void usesTodaysHourlyForecastForAFutureReferenceHour() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-21T06:20:00Z"));
+        AsosWeatherGateway gateway = new AsosWeatherGateway() {
+            @Override
+            public AsosObservation fetchLatest() {
+                throw new AssertionError("미래 기준 시각에 최신 관측을 재사용하면 안 됩니다.");
+            }
+
+            @Override
+            public boolean configured() {
+                return true;
+            }
+        };
+        ForecastWeatherGateway forecastGateway = requestedAt -> new ForecastWeather(
+                requestedAt, 27.5, 3.2, 180.0, 0.0, 74.0
+        );
+        LiveWeatherService service = new LiveWeatherService(gateway, forecastGateway, properties(), clock);
+
+        var result = service.resolve(Instant.parse("2026-08-21T09:00:00Z"));
+
+        assertThat(result).get().extracting("source").isEqualTo("FORECAST");
+        assertThat(result).get().extracting("airTemperatureC").isEqualTo(27.5);
+        assertThat(result).get().extracting("solarRadiationWm2").isEqualTo(180.0);
+    }
+
+    @Test
+    void fallsBackToTodaysHourlyForecastWhenHistoricalAsosAccessIsUnavailable() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-21T06:20:00Z"));
+        AsosWeatherGateway gateway = new AsosWeatherGateway() {
+            @Override
+            public AsosObservation fetchLatest() {
+                throw new AssertionError("지난 기준 시각에 최신 관측을 재사용하면 안 됩니다.");
+            }
+
+            @Override
+            public AsosObservation fetchAt(Instant requestedAt) {
+                throw new IllegalStateException("시간자료 API 활용 권한 없음");
+            }
+
+            @Override
+            public boolean configured() {
+                return true;
+            }
+        };
+        ForecastWeatherGateway forecastGateway = requestedAt -> new ForecastWeather(
+                requestedAt, 25.2, 2.1, 95.0, 0.0, 82.0
+        );
+        LiveWeatherService service = new LiveWeatherService(gateway, forecastGateway, properties(), clock);
+
+        var result = service.resolve(Instant.parse("2026-08-21T03:00:00Z"));
+
+        assertThat(result).get().extracting("source").isEqualTo("FORECAST");
+        assertThat(result).get().extracting("airTemperatureC").isEqualTo(25.2);
     }
 
     private static AsosObservation observation(Instant observedAt) {
