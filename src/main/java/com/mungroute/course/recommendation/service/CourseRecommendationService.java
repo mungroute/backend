@@ -306,7 +306,9 @@ public class CourseRecommendationService {
 
     private static String weatherSource(CourseMetrics metrics, CourseCalculationContext context) {
         if (metrics != null && ("NOWCAST".equals(metrics.thermalStatus())
-                || "CACHED".equals(metrics.thermalStatus()))) {
+                || "CACHED".equals(metrics.thermalStatus())
+                || "OBSERVED".equals(metrics.thermalStatus())
+                || "FORECAST".equals(metrics.thermalStatus()))) {
             return metrics.thermalStatus();
         }
         return context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE";

@@ -65,6 +65,11 @@ external:
       stale-ttl: ${KMA_ASOS_STALE_TTL:2h}
       retry-delay: ${KMA_ASOS_RETRY_DELAY:1m}
       live-request-window: ${KMA_ASOS_LIVE_REQUEST_WINDOW:90m}
+  weather:
+    forecast:
+      base-url: ${WEATHER_FORECAST_BASE_URL:https://api.open-meteo.com}
+      latitude: ${WEATHER_FORECAST_LATITUDE:37.5665}
+      longitude: ${WEATHER_FORECAST_LONGITUDE:126.9780}
   food-safety:
     pet-restaurants:
       export-url: ${FOOD_SAFETY_PET_RESTAURANTS_EXPORT_URL:https://www.foodsafetykorea.go.kr/portal/petKorea/downloadExcel.do}

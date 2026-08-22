@@ -182,6 +182,8 @@ public class CourseDiagnosticService {
         return switch (metrics.thermalStatus()) {
             case "NOWCAST" -> "NOWCAST_FIXED_SHADE";
             case "CACHED" -> "CACHED_FIXED_SHADE";
+            case "OBSERVED" -> "OBSERVED_FIXED_SHADE";
+            case "FORECAST" -> "FORECAST_FIXED_SHADE";
             default -> context.shadeApplicable() ? "SELECTED_REFERENCE" : "H18_REFERENCE";
         };
     }

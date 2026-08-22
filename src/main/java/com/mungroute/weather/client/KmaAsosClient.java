@@ -7,6 +7,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -40,6 +41,28 @@ public class KmaAsosClient implements AsosWeatherGateway {
             return parse(body);
         } catch (RestClientException exception) {
             throw new WeatherClientException("기상청 ASOS 관측값을 가져오지 못했습니다.", exception);
+        }
+    }
+
+    @Override
+    public AsosObservation fetchAt(Instant requestedAt) {
+        if (!configured()) throw new WeatherClientException("기상청 API허브 인증키가 설정되지 않았습니다.");
+        if (requestedAt == null) throw new IllegalArgumentException("조회 시각은 필수입니다.");
+        String requestedTime = OBSERVED_AT.format(requestedAt.atZone(SERVICE_ZONE));
+        try {
+            String body = restClient.get()
+                    .uri(uri -> uri.path("/api/typ01/url/kma_sfctm3.php")
+                            .queryParam("tm1", requestedTime)
+                            .queryParam("tm2", requestedTime)
+                            .queryParam("stn", properties.stationId())
+                            .queryParam("help", 0)
+                            .queryParam("authKey", properties.authKey())
+                            .build())
+                    .retrieve()
+                    .body(String.class);
+            return parse(body);
+        } catch (RestClientException exception) {
+            throw new WeatherClientException("기상청 ASOS 시간별 관측값을 가져오지 못했습니다.", exception);
         }
     }
 

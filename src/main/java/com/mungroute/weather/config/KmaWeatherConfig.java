@@ -10,11 +10,24 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 
 @Configuration
-@EnableConfigurationProperties(KmaAsosProperties.class)
+@EnableConfigurationProperties({KmaAsosProperties.class, HourlyForecastProperties.class})
 public class KmaWeatherConfig {
 
     @Bean
     RestClient kmaAsosRestClient(KmaAsosProperties properties) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofSeconds(3));
+        return RestClient.builder()
+                .baseUrl(properties.baseUrl())
+                .requestFactory(requestFactory)
+                .build();
+    }
+
+    @Bean
+    RestClient hourlyForecastRestClient(HourlyForecastProperties properties) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();

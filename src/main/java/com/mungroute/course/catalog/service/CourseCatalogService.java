@@ -250,7 +250,7 @@ public class CourseCatalogService {
 
     private static String weatherSource(CourseMetrics metrics, CourseCalculationContext context) {
         return switch (metrics.thermalStatus()) {
-            case "NOWCAST", "CACHED" -> metrics.thermalStatus();
+            case "NOWCAST", "CACHED", "OBSERVED", "FORECAST" -> metrics.thermalStatus();
             default -> context.shadeApplicable() ? "SCENARIO" : "SCENARIO_REFERENCE";
         };
     }
