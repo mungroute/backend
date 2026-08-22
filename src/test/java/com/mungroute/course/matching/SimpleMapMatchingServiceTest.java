@@ -35,6 +35,22 @@ class SimpleMapMatchingServiceTest {
     }
 
     @Test
+    void acceptsDistinctGpsPointsThatAllBelongToOneRoadSegment() {
+        FakeRepository repository = new FakeRepository(List.of(
+                point(1, 0, 0, 11, 1, 2),
+                point(2, 10, 0, 11, 1, 2),
+                point(3, 20, 0, 11, 1, 2)
+        ));
+
+        MapMatchingResult result = new SimpleMapMatchingService(repository).matchSession(7L);
+
+        assertThat(result.status()).isEqualTo(WalkMatchStatus.MATCHED);
+        assertThat(result.failure()).isEqualTo(MapMatchingFailure.NONE);
+        assertThat(result.segmentIds()).containsExactly(11L);
+        assertThat(repository.savedSegmentIds).containsExactly(11L);
+    }
+
+    @Test
     void failsWhenMoreThanTwentyPercentOfPointsAreUnmatched() {
         FakeRepository repository = new FakeRepository(List.of(
                 point(1, 0, 0, 11, 1, 2),

@@ -64,7 +64,7 @@ public class SimpleMapMatchingService {
                 .filter(MatchedTrackPoint::matched)
                 .map(sample -> new SegmentRef(sample.segmentId(), sample.source(), sample.target()))
                 .toList());
-        if (rawSegments.size() < 2) {
+        if (rawSegments.isEmpty()) {
             return failed(
                     WalkMatchStatus.INSUFFICIENT_POINTS,
                     MapMatchingFailure.INSUFFICIENT_POINTS,
