@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.data.Offset.offset;
 
 class CourseLegResolverTest {
     private final CourseLegResolver resolver = new CourseLegResolver(new ObjectMapper());
@@ -63,5 +64,35 @@ class CourseLegResolverTest {
 
         assertThat(legs.legSequences()).containsExactly(1, 1, 2, 2, 3);
         assertThat(legs.reverseRoute()).isTrue();
+    }
+
+    @Test
+    void recalculatesLegacyFullLinkLengthsFromActualWaypointGeometry() {
+        String route = """
+                {"type":"LineString","coordinates":[
+                  [126.000000,37.000000],
+                  [126.000000,37.001664],
+                  [126.000000,37.003664]
+                ]}
+                """;
+        String waypoints = """
+                [
+                  {"snapped":{"lat":37.000000,"lon":126.000000}},
+                  {"snapped":{"lat":37.001664,"lon":126.000000}},
+                  {"snapped":{"lat":37.003664,"lon":126.000000}}
+                ]
+                """;
+        List<BigDecimal> legacyFullLinkLengths = List.of(
+                new BigDecimal("439"),
+                new BigDecimal("600")
+        );
+
+        var resolution = resolver.resolve(waypoints, route, legacyFullLinkLengths);
+        var reconciled = resolver.reconcileWithGeometry(legacyFullLinkLengths, resolution);
+
+        assertThat(resolution.legSequences()).containsExactly(1, 2);
+        assertThat(reconciled.getFirst().doubleValue()).isCloseTo(185.0, offset(0.5));
+        assertThat(reconciled.stream().mapToDouble(BigDecimal::doubleValue).sum())
+                .isCloseTo(407.4, offset(0.7));
     }
 }

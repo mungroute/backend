@@ -7,10 +7,13 @@ import com.mungroute.course.domain.PathCandidate;
 import com.mungroute.course.domain.SegmentSwapResult;
 import com.mungroute.course.repository.CourseRoutingRepository;
 import com.mungroute.course.repository.MatchedTrackPoint;
+import com.mungroute.course.draw.time.CourseCalculationContext;
+import com.mungroute.course.draw.time.SolarState;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashMap;
@@ -42,6 +45,8 @@ class SegmentSwapServiceTest {
                 .containsExactly(101L, 102L, 3L, 4L, 5L, 6L);
         assertThat(result.swappedSections()).hasSize(1);
         assertThat(result.swappedSections().getFirst().sectionIndex()).isZero();
+        assertThat(result.swappedSections().getFirst().fromSegmentIndex()).isZero();
+        assertThat(result.swappedSections().getFirst().toSegmentIndexExclusive()).isEqualTo(2);
         assertThat(result.reason()).isNull();
         assertThat(result.alternative().thermalStatus()).isEqualTo("REFERENCE");
         assertThat(result.alternative().confidence()).isEqualTo("LOW");
@@ -110,6 +115,42 @@ class SegmentSwapServiceTest {
         assertThat(result.reason()).isEqualTo(AlternativeReason.NO_CANDIDATE_MEETS_DETOUR_LIMIT);
     }
 
+    @Test
+    void replacesWaypointSplitSegmentUsingMeasuredOccurrenceLengths() {
+        FakeRoutingRepository repository = new FakeRoutingRepository();
+        repository.put(segment(10, 1, 2, "100", "0.2", "40"));
+        repository.put(segment(20, 2, 3, "100", "0.2", "40"));
+        repository.put(segment(30, 3, 4, "100", "0.2", "40"));
+        repository.put(segment(201, 2, 8, "40", "0.8", "30"));
+        repository.put(segment(202, 8, 3, "40", "0.8", "30"));
+
+        SegmentSwapResult result = service(repository).recommend(
+                new CoursePath(List.of(10L, 20L, 20L, 30L)),
+                List.of(
+                        new BigDecimal("100"),
+                        new BigDecimal("40"),
+                        new BigDecimal("60"),
+                        new BigDecimal("100")
+                ),
+                new CourseCalculationContext(
+                        Instant.parse("2026-08-24T03:00:00Z"),
+                        ThermalReferenceTime.H12,
+                        SolarState.DAYLIGHT,
+                        55.0
+                ),
+                7,
+                0.25
+        );
+
+        assertThat(result.hasAlternative()).isTrue();
+        assertThat(result.base().lengthM()).isEqualByComparingTo("300.00");
+        assertThat(result.alternative().lengthM()).isEqualByComparingTo("280.00");
+        assertThat(result.alternativePath().segmentIds())
+                .containsExactly(10L, 201L, 202L, 30L);
+        assertThat(result.swappedSections().getFirst().originalSegmentIds())
+                .containsExactly(20L, 20L);
+    }
+
     private SegmentSwapService service(FakeRoutingRepository repository) {
         return new SegmentSwapService(
                 repository,
@@ -173,6 +214,20 @@ class SegmentSwapServiceTest {
                 int candidateCount,
                 double shadeAlpha
         ) {
+            if (segments.containsKey(10L)) {
+                if (startNode == 1 && endNode == 2) {
+                    return List.of(new PathCandidate(List.of(10L), new BigDecimal("100")));
+                }
+                if (startNode == 2 && endNode == 3) {
+                    return List.of(
+                            new PathCandidate(List.of(20L, 20L), new BigDecimal("100")),
+                            new PathCandidate(List.of(201L, 202L), new BigDecimal("80"))
+                    );
+                }
+                if (startNode == 3 && endNode == 4) {
+                    return List.of(new PathCandidate(List.of(30L), new BigDecimal("100")));
+                }
+            }
             if (startNode == 1 && endNode == 3) {
                 return List.of(
                         new PathCandidate(List.of(1L, 2L), new BigDecimal("200")),

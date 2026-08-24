@@ -95,10 +95,32 @@ public class DogProfile {
             LocalDate birthDate,
             String profileImageUrl,
             List<String> temperamentTags,
+            String gender,
+            Boolean neutered,
+            String introduction,
+            String leashGreeting,
+            String strangerResponse,
+            String touchTolerance,
+            String barkingLevel,
+            String bitingLevel,
             boolean defaultDog
     ) {
         this.user = Objects.requireNonNull(user, "사용자는 필수입니다.");
-        changeProfile(name, breed, birthDate, profileImageUrl, temperamentTags);
+        changeProfile(
+                name,
+                breed,
+                birthDate,
+                profileImageUrl,
+                temperamentTags,
+                gender,
+                neutered,
+                introduction,
+                leashGreeting,
+                strangerResponse,
+                touchTolerance,
+                barkingLevel,
+                bitingLevel
+        );
         this.defaultDog = defaultDog;
     }
 
@@ -109,9 +131,33 @@ public class DogProfile {
             LocalDate birthDate,
             String profileImageUrl,
             List<String> temperamentTags,
+            String gender,
+            Boolean neutered,
+            String introduction,
+            String leashGreeting,
+            String strangerResponse,
+            String touchTolerance,
+            String barkingLevel,
+            String bitingLevel,
             boolean defaultDog
     ) {
-        return new DogProfile(user, name, breed, birthDate, profileImageUrl, temperamentTags, defaultDog);
+        return new DogProfile(
+                user,
+                name,
+                breed,
+                birthDate,
+                profileImageUrl,
+                temperamentTags,
+                gender,
+                neutered,
+                introduction,
+                leashGreeting,
+                strangerResponse,
+                touchTolerance,
+                barkingLevel,
+                bitingLevel,
+                defaultDog
+        );
     }
 
     public void updateProfile(
@@ -119,10 +165,32 @@ public class DogProfile {
             String breed,
             LocalDate birthDate,
             String profileImageUrl,
-            List<String> temperamentTags
+            List<String> temperamentTags,
+            String gender,
+            Boolean neutered,
+            String introduction,
+            String leashGreeting,
+            String strangerResponse,
+            String touchTolerance,
+            String barkingLevel,
+            String bitingLevel
     ) {
         ensureActive();
-        changeProfile(name, breed, birthDate, profileImageUrl, temperamentTags);
+        changeProfile(
+                name,
+                breed,
+                birthDate,
+                profileImageUrl,
+                temperamentTags,
+                gender,
+                neutered,
+                introduction,
+                leashGreeting,
+                strangerResponse,
+                touchTolerance,
+                barkingLevel,
+                bitingLevel
+        );
     }
 
     public void changeDefault(boolean defaultDog) {
@@ -153,7 +221,15 @@ public class DogProfile {
             String breed,
             LocalDate birthDate,
             String profileImageUrl,
-            List<String> temperamentTags
+            List<String> temperamentTags,
+            String gender,
+            Boolean neutered,
+            String introduction,
+            String leashGreeting,
+            String strangerResponse,
+            String touchTolerance,
+            String barkingLevel,
+            String bitingLevel
     ) {
         this.name = requireText(name, "이름");
         this.breed = requireText(breed, "견종");
@@ -172,6 +248,16 @@ public class DogProfile {
             throw new IllegalArgumentException("성향 태그는 최대 5개까지 선택할 수 있습니다.");
         }
         this.temperamentTags = normalizedTags.toArray(String[]::new);
+        this.gender = defaultValue(gender);
+        this.neutered = neutered;
+        this.introduction = normalizeOptionalText(introduction);
+        this.leashGreeting = defaultValue(leashGreeting);
+        this.strangerResponse = defaultValue(strangerResponse);
+        this.touchTolerance = defaultValue(touchTolerance);
+        this.barkingLevel = defaultValue(barkingLevel);
+        this.bitingLevel = defaultValue(bitingLevel);
+        // 기존 JDBC 구현처럼 값이 같은 수정 요청도 마지막 수정 시각을 남긴다.
+        this.updatedAt = OffsetDateTime.now();
     }
 
     private void ensureActive() {
@@ -185,6 +271,14 @@ public class DogProfile {
             throw new IllegalArgumentException(fieldName + "은(는) 필수입니다.");
         }
         return value.trim();
+    }
+
+    private static String defaultValue(String value) {
+        return value == null || value.isBlank() ? "UNKNOWN" : value.trim();
+    }
+
+    private static String normalizeOptionalText(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     public Long getDogId() {

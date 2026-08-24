@@ -5,6 +5,8 @@ import java.util.List;
 
 public record SwappedSection(
         int sectionIndex,
+        int fromSegmentIndex,
+        int toSegmentIndexExclusive,
         List<Long> originalSegmentIds,
         List<Long> alternativeSegmentIds,
         BigDecimal temperatureImprovementC,

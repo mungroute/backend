@@ -29,17 +29,14 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 public class CourseDrawService {
     private static final double SNAP_RADIUS_M = 30.0;
     private static final double DIRECT_POINT_TOLERANCE_M = 3.0;
-    private static final double MIN_BACKTRACK_SAVING_M = 5.0;
     private static final double MAX_COURSE_LENGTH_M = 50_000.0;
 
     private final AppUserRepository appUserRepository;
@@ -85,15 +82,15 @@ public class CourseDrawService {
 
     @Transactional(readOnly = true)
     public ConnectCourseResponse connect(ConnectCourseRequest request) {
-        RouteAssembly route = buildRoute(request.waypoints(), true);
-        CourseCalculationContext context = calculationContext(route.waypoints(), request.requestedAt());
+        RouteAssembly route = buildRoute(request.waypoints());
+        CourseCalculationContext context = calculationContext(request.waypoints(), request.requestedAt());
         CourseMetrics metrics = calculateMetrics(route.traversedSegments(), context);
         return new ConnectCourseResponse(
                 route.lastAddedSegmentIds(),
                 route.segmentIds(),
                 route.coordinates(),
                 toResponse(metrics, context),
-                route.ignoredWaypointIndexes()
+                List.of()
         );
     }
 
@@ -101,7 +98,7 @@ public class CourseDrawService {
     public CustomCourseResponse save(long userId, SaveCustomCourseRequest request) {
         appUserRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(CourseDrawErrorCode.USER_NOT_FOUND));
-        RouteAssembly route = buildRoute(request.waypoints(), false);
+        RouteAssembly route = buildRoute(request.waypoints());
         CourseCalculationContext context = calculationContext(request.waypoints(), request.requestedAt());
         CourseMetrics metrics = calculateMetrics(route.traversedSegments(), context);
         validateLoop(request);
@@ -180,20 +177,14 @@ public class CourseDrawService {
         }
     }
 
-    private RouteAssembly buildRoute(
-            List<com.mungroute.course.draw.dto.DrawWaypointRequest> waypoints,
-            boolean suppressLatestFallbackBacktrack
-    ) {
+    private RouteAssembly buildRoute(List<com.mungroute.course.draw.dto.DrawWaypointRequest> waypoints) {
         Map<RouteLeg, ConnectedWalkablePath> pathCache = new LinkedHashMap<>();
-        WaypointSelection selection = suppressLatestFallbackBacktrack
-                ? suppressLatestFallbackBacktrack(waypoints, pathCache)
-                : new WaypointSelection(waypoints, List.of());
         List<TraversedWalkableSegment> traversedSegments = new ArrayList<>();
         List<GeoPointResponse> coordinates = new ArrayList<>();
         List<Long> lastAddedSegmentIds = List.of();
-        for (int index = 1; index < selection.waypoints().size(); index++) {
-            var from = selection.waypoints().get(index - 1);
-            var to = selection.waypoints().get(index);
+        for (int index = 1; index < waypoints.size(); index++) {
+            var from = waypoints.get(index - 1);
+            var to = waypoints.get(index);
             ConnectedWalkablePath path = findPath(from, to, pathCache)
                     .orElseThrow(() -> new BusinessException(CourseDrawErrorCode.NOT_CONNECTED));
             traversedSegments.addAll(path.traversedSegments());
@@ -206,42 +197,8 @@ public class CourseDrawService {
         return new RouteAssembly(
                 traversedSegments,
                 coordinates,
-                lastAddedSegmentIds,
-                selection.waypoints(),
-                selection.ignoredWaypointIndexes()
+                lastAddedSegmentIds
         );
-    }
-
-    private WaypointSelection suppressLatestFallbackBacktrack(
-            List<com.mungroute.course.draw.dto.DrawWaypointRequest> waypoints,
-            Map<RouteLeg, ConnectedWalkablePath> pathCache
-    ) {
-        if (waypoints.size() < 3) {
-            return new WaypointSelection(waypoints, List.of());
-        }
-        int candidateIndex = waypoints.size() - 2;
-        var candidate = waypoints.get(candidateIndex);
-        if (!candidate.fallbackApplied()) {
-            return new WaypointSelection(waypoints, List.of());
-        }
-        var previous = waypoints.get(candidateIndex - 1);
-        var next = waypoints.get(candidateIndex + 1);
-        var incoming = findPath(previous, candidate, pathCache);
-        var outgoing = findPath(candidate, next, pathCache);
-        var direct = findPath(previous, next, pathCache);
-        if (incoming.isEmpty() || outgoing.isEmpty() || direct.isEmpty()) {
-            return new WaypointSelection(waypoints, List.of());
-        }
-        Set<Long> incomingSegments = new HashSet<>(incoming.get().segmentIds());
-        boolean repeatsSegment = outgoing.get().segmentIds().stream().anyMatch(incomingSegments::contains);
-        double routedThroughCandidateM = pathLengthM(incoming.get()) + pathLengthM(outgoing.get());
-        double directLengthM = pathLengthM(direct.get());
-        if (!repeatsSegment || routedThroughCandidateM - directLengthM < MIN_BACKTRACK_SAVING_M) {
-            return new WaypointSelection(waypoints, List.of());
-        }
-        List<com.mungroute.course.draw.dto.DrawWaypointRequest> retained = new ArrayList<>(waypoints);
-        retained.remove(candidateIndex);
-        return new WaypointSelection(retained, List.of(candidateIndex));
     }
 
     private java.util.Optional<ConnectedWalkablePath> findPath(
@@ -258,12 +215,6 @@ public class CourseDrawService {
         );
         path.ifPresent(value -> pathCache.put(leg, value));
         return path;
-    }
-
-    private double pathLengthM(ConnectedWalkablePath path) {
-        return path.traversedSegments().stream()
-                .mapToDouble(segment -> segment.lengthM().doubleValue())
-                .sum();
     }
 
     private NetworkWaypoint networkWaypoint(com.mungroute.course.draw.dto.DrawWaypointRequest waypoint) {
@@ -357,30 +308,16 @@ public class CourseDrawService {
     private record RouteAssembly(
             List<TraversedWalkableSegment> traversedSegments,
             List<GeoPointResponse> coordinates,
-            List<Long> lastAddedSegmentIds,
-            List<com.mungroute.course.draw.dto.DrawWaypointRequest> waypoints,
-            List<Integer> ignoredWaypointIndexes
+            List<Long> lastAddedSegmentIds
     ) {
         private RouteAssembly {
             traversedSegments = List.copyOf(traversedSegments);
             coordinates = List.copyOf(coordinates);
             lastAddedSegmentIds = List.copyOf(lastAddedSegmentIds);
-            waypoints = List.copyOf(waypoints);
-            ignoredWaypointIndexes = List.copyOf(ignoredWaypointIndexes);
         }
 
         private List<Long> segmentIds() {
             return traversedSegments.stream().map(TraversedWalkableSegment::segmentId).toList();
-        }
-    }
-
-    private record WaypointSelection(
-            List<com.mungroute.course.draw.dto.DrawWaypointRequest> waypoints,
-            List<Integer> ignoredWaypointIndexes
-    ) {
-        private WaypointSelection {
-            waypoints = List.copyOf(waypoints);
-            ignoredWaypointIndexes = List.copyOf(ignoredWaypointIndexes);
         }
     }
 
