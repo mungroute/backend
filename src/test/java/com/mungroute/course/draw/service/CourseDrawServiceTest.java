@@ -114,7 +114,7 @@ class CourseDrawServiceTest {
     }
 
     @Test
-    void removesAnAutomaticallySnappedIntermediatePointThatCreatesABacktrackingSpur() {
+    void preservesEverySelectedWaypointEvenWhenAFallbackPointCreatesABacktrackingSpur() {
         DrawWaypointRequest start = waypoint(1L, 101L, 37.5665, 126.9780, false);
         DrawWaypointRequest fallback = waypoint(2L, 102L, 37.5666, 126.9782, true);
         DrawWaypointRequest end = waypoint(3L, 103L, 37.5667, 126.9784, false);
@@ -138,23 +138,19 @@ class CourseDrawServiceTest {
                                 fallback, end
                         ));
                     }
-                    if (from.segmentId() == 101L && to.segmentId() == 103L) {
-                        return Optional.of(path(
-                                new long[]{504L},
-                                new String[]{"45.0"},
-                                start, end
-                        ));
-                    }
                     return Optional.empty();
                 });
-        when(courseDrawRepository.allSegmentsWalkable(List.of(504L))).thenReturn(true);
-        when(courseRoutingRepository.findSegmentsInOrder(List.of(504L), ThermalReferenceTime.H15))
-                .thenReturn(List.of(new CourseSegmentData(
-                        504L, 1L, 3L, new BigDecimal("45.0"), new BigDecimal("0.420"),
-                        new BigDecimal("36.20"), "MEDIUM", LocalDate.of(2026, 8, 11)
-                )));
+        List<Long> traversedSegmentIds = List.of(501L, 502L, 502L, 503L);
+        when(courseDrawRepository.allSegmentsWalkable(traversedSegmentIds)).thenReturn(true);
+        when(courseRoutingRepository.findSegmentsInOrder(traversedSegmentIds, ThermalReferenceTime.H15))
+                .thenReturn(List.of(
+                        segment(501L, 1L, 2L, "30.0"),
+                        segment(502L, 1L, 2L, "20.0"),
+                        segment(502L, 2L, 3L, "20.0"),
+                        segment(503L, 2L, 3L, "30.0")
+                ));
         when(metricsCalculator.calculate(any(), any(CourseCalculationContext.class))).thenReturn(new CourseMetrics(
-                new BigDecimal("45.0"), 1, new BigDecimal("0.420"), new BigDecimal("36.20"),
+                new BigDecimal("100.0"), 3, new BigDecimal("0.420"), new BigDecimal("36.20"),
                 "REFERENCE", LocalDate.of(2026, 8, 11), "MEDIUM"
         ));
         when(solarPositionService.resolve(any(Instant.class), anyDouble(), anyDouble()))
@@ -167,9 +163,9 @@ class CourseDrawServiceTest {
                 requestedAt
         ));
 
-        assertThat(response.ignoredWaypointIndexes()).containsExactly(1);
-        assertThat(response.segmentIds()).containsExactly(504L);
-        assertThat(response.cumulative().lengthM()).isEqualByComparingTo("45.0");
+        assertThat(response.ignoredWaypointIndexes()).isEmpty();
+        assertThat(response.segmentIds()).containsExactly(501L, 502L, 502L, 503L);
+        assertThat(response.cumulative().lengthM()).isEqualByComparingTo("100.0");
     }
 
     private DrawWaypointRequest waypoint(long nodeId, long segmentId, double lat, double lon) {
@@ -203,6 +199,13 @@ class CourseDrawServiceTest {
                         new GeoPointResponse(start.snapped().lat(), start.snapped().lon()),
                         new GeoPointResponse(end.snapped().lat(), end.snapped().lon())
                 )
+        );
+    }
+
+    private CourseSegmentData segment(long segmentId, long source, long target, String lengthM) {
+        return new CourseSegmentData(
+                segmentId, source, target, new BigDecimal(lengthM), new BigDecimal("0.420"),
+                new BigDecimal("36.20"), "MEDIUM", LocalDate.of(2026, 8, 11)
         );
     }
 }

@@ -5,9 +5,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 final class CourseLegResolver {
     private static final double EARTH_RADIUS_M = 6_371_000.0;
@@ -27,19 +30,23 @@ final class CourseLegResolver {
             List<RoutePoint> waypoints = waypointPoints(objectMapper.readTree(waypointsJson));
             if (route.size() < 2 || waypoints.size() < 2) return Resolution.empty();
 
-            List<Integer> forward = resolveOrdered(route, waypoints, segmentLengths);
-            if (!forward.isEmpty()) return new Resolution(forward, false);
+            OrderedResolution forward = resolveOrdered(route, waypoints, segmentLengths);
+            if (!forward.legSequences().isEmpty()) {
+                return new Resolution(forward.legSequences(), false, forward.legLengthsM());
+            }
 
             List<RoutePoint> reversed = new ArrayList<>(route);
             Collections.reverse(reversed);
-            List<Integer> backward = resolveOrdered(reversed, waypoints, segmentLengths);
-            return backward.isEmpty() ? Resolution.empty() : new Resolution(backward, true);
+            OrderedResolution backward = resolveOrdered(reversed, waypoints, segmentLengths);
+            return backward.legSequences().isEmpty()
+                    ? Resolution.empty()
+                    : new Resolution(backward.legSequences(), true, backward.legLengthsM());
         } catch (JacksonException | IllegalArgumentException exception) {
             return Resolution.empty();
         }
     }
 
-    private List<Integer> resolveOrdered(
+    private OrderedResolution resolveOrdered(
             List<RoutePoint> route,
             List<RoutePoint> waypoints,
             List<BigDecimal> segmentLengths
@@ -47,10 +54,17 @@ final class CourseLegResolver {
         double[] routeMeters = cumulativeMeters(route);
         double routeTotal = routeMeters[routeMeters.length - 1];
         double segmentTotal = segmentLengths.stream().mapToDouble(BigDecimal::doubleValue).sum();
-        if (routeTotal <= 0 || segmentTotal <= 0) return List.of();
+        if (routeTotal <= 0 || segmentTotal <= 0) return OrderedResolution.empty();
 
         List<Double> legEnds = locateLegEnds(route, routeMeters, waypoints);
-        if (legEnds.size() != waypoints.size() - 1) return List.of();
+        if (legEnds.size() != waypoints.size() - 1) return OrderedResolution.empty();
+
+        List<BigDecimal> legLengths = new ArrayList<>(legEnds.size());
+        double legStart = 0;
+        for (double legEnd : legEnds) {
+            legLengths.add(BigDecimal.valueOf(Math.max(0, legEnd - legStart)));
+            legStart = legEnd;
+        }
 
         List<Integer> result = new ArrayList<>(segmentLengths.size());
         double segmentBefore = 0;
@@ -64,7 +78,56 @@ final class CourseLegResolver {
             result.add(legSequence);
             segmentBefore = segmentAfter;
         }
-        return List.copyOf(result);
+        return new OrderedResolution(result, legLengths);
+    }
+
+    List<BigDecimal> reconcileWithGeometry(
+            List<BigDecimal> storedLengths,
+            Resolution resolution
+    ) {
+        if (storedLengths == null
+                || storedLengths.isEmpty()
+                || resolution.legSequences().size() != storedLengths.size()
+                || resolution.legLengthsM().isEmpty()) {
+            return storedLengths == null ? List.of() : List.copyOf(storedLengths);
+        }
+
+        Map<Integer, BigDecimal> storedTotals = new HashMap<>();
+        Map<Integer, Integer> lastIndexes = new HashMap<>();
+        for (int index = 0; index < storedLengths.size(); index++) {
+            int leg = resolution.legSequences().get(index);
+            storedTotals.merge(leg, storedLengths.get(index), BigDecimal::add);
+            lastIndexes.put(leg, index);
+        }
+
+        Map<Integer, BigDecimal> remainingStored = new HashMap<>(storedTotals);
+        Map<Integer, BigDecimal> remainingActual = new HashMap<>();
+        for (int index = 0; index < resolution.legLengthsM().size(); index++) {
+            remainingActual.put(index + 1, resolution.legLengthsM().get(index));
+        }
+
+        List<BigDecimal> reconciled = new ArrayList<>(storedLengths.size());
+        for (int index = 0; index < storedLengths.size(); index++) {
+            int leg = resolution.legSequences().get(index);
+            BigDecimal stored = storedLengths.get(index);
+            BigDecimal storedRemaining = remainingStored.get(leg);
+            BigDecimal actualRemaining = remainingActual.get(leg);
+            if (storedRemaining == null || storedRemaining.signum() <= 0
+                    || actualRemaining == null || actualRemaining.signum() <= 0) {
+                reconciled.add(stored);
+                continue;
+            }
+
+            BigDecimal actual = lastIndexes.get(leg) == index
+                    ? actualRemaining
+                    : actualRemaining.multiply(stored)
+                    .divide(storedRemaining, 6, RoundingMode.HALF_UP);
+            actual = actual.max(BigDecimal.valueOf(0.001));
+            reconciled.add(actual);
+            remainingStored.put(leg, storedRemaining.subtract(stored));
+            remainingActual.put(leg, actualRemaining.subtract(actual));
+        }
+        return List.copyOf(reconciled);
     }
 
     private List<Double> locateLegEnds(
@@ -146,13 +209,33 @@ final class CourseLegResolver {
     private record RoutePoint(double lon, double lat) {
     }
 
-    record Resolution(List<Integer> legSequences, boolean reverseRoute) {
+    private record OrderedResolution(List<Integer> legSequences, List<BigDecimal> legLengthsM) {
+        private OrderedResolution {
+            legSequences = List.copyOf(legSequences);
+            legLengthsM = List.copyOf(legLengthsM);
+        }
+
+        static OrderedResolution empty() {
+            return new OrderedResolution(List.of(), List.of());
+        }
+    }
+
+    record Resolution(
+            List<Integer> legSequences,
+            boolean reverseRoute,
+            List<BigDecimal> legLengthsM
+    ) {
         Resolution {
             legSequences = List.copyOf(legSequences);
+            legLengthsM = List.copyOf(legLengthsM);
+        }
+
+        Resolution(List<Integer> legSequences, boolean reverseRoute) {
+            this(legSequences, reverseRoute, List.of());
         }
 
         static Resolution empty() {
-            return new Resolution(List.of(), false);
+            return new Resolution(List.of(), false, List.of());
         }
     }
 }

@@ -15,6 +15,7 @@ import com.mungroute.proximity.exception.PresenceErrorCode;
 import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.proximity.store.PresenceSessionState;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
@@ -109,6 +110,11 @@ public class MeetPresenceService {
         if (presenceRepository.updateTelemetry(sessionId, request.accuracy(), request.heading(), request.stationary(), now) != 1) {
             throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
         }
+        locationStore.cacheSession(new PresenceSessionState(
+                sessionId,
+                userId,
+                WalkMode.MEET.getValue()
+        ));
     }
 
     private void validateTimestamp(OffsetDateTime measuredAt) {

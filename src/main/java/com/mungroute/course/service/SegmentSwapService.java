@@ -54,7 +54,7 @@ public class SegmentSwapService {
             int targetTimeMin,
             double overallDetourRatio
     ) {
-        return recommendInternal(basePath, referenceTime, null, targetTimeMin, overallDetourRatio);
+        return recommendInternal(basePath, null, referenceTime, null, targetTimeMin, overallDetourRatio);
     }
 
     public SegmentSwapResult recommend(
@@ -64,11 +64,30 @@ public class SegmentSwapService {
             double overallDetourRatio
     ) {
         if (context == null) throw new IllegalArgumentException("코스 계산 컨텍스트는 필수입니다.");
-        return recommendInternal(basePath, context.referenceTime(), context, targetTimeMin, overallDetourRatio);
+        return recommendInternal(basePath, null, context.referenceTime(), context, targetTimeMin, overallDetourRatio);
+    }
+
+    public SegmentSwapResult recommend(
+            CoursePath basePath,
+            List<BigDecimal> baseSegmentLengthsM,
+            CourseCalculationContext context,
+            int targetTimeMin,
+            double overallDetourRatio
+    ) {
+        if (context == null) throw new IllegalArgumentException("코스 계산 컨텍스트는 필수입니다.");
+        return recommendInternal(
+                basePath,
+                baseSegmentLengthsM,
+                context.referenceTime(),
+                context,
+                targetTimeMin,
+                overallDetourRatio
+        );
     }
 
     private SegmentSwapResult recommendInternal(
             CoursePath basePath,
+            List<BigDecimal> baseSegmentLengthsM,
             ThermalReferenceTime referenceTime,
             CourseCalculationContext context,
             int targetTimeMin,
@@ -77,7 +96,10 @@ public class SegmentSwapService {
         if (targetTimeMin <= 0 || !Double.isFinite(overallDetourRatio) || overallDetourRatio < 0) {
             throw new IllegalArgumentException("목표 시간과 허용 우회율이 올바르지 않습니다.");
         }
-        List<CourseSegmentData> baseSegments = loadComplete(basePath.segmentIds(), referenceTime);
+        List<CourseSegmentData> baseSegments = withMeasuredLengths(
+                loadComplete(basePath.segmentIds(), referenceTime),
+                baseSegmentLengthsM
+        );
         CourseMetrics baseMetrics;
         try {
             baseMetrics = calculate(baseSegments, context);
@@ -116,7 +138,11 @@ public class SegmentSwapService {
                 continue;
             }
             List<Long> alternativeIds = applyReplacements(basePath.segmentIds(), combination);
-            List<CourseSegmentData> alternativeSegments = loadComplete(alternativeIds, referenceTime);
+            List<CourseSegmentData> alternativeSegments = applyReplacements(
+                    baseSegments,
+                    combination,
+                    referenceTime
+            );
             CourseMetrics alternativeMetrics;
             try {
                 alternativeMetrics = calculate(alternativeSegments, context);
@@ -177,13 +203,10 @@ public class SegmentSwapService {
         boolean foundPath = false;
         boolean passedDetour = false;
         boolean improvedTemperature = false;
-        Set<Long> allBaseIds = new HashSet<>(basePath.segmentIds());
-
         for (CourseSection section : sections) {
             CourseMetrics originalMetrics = calculate(
                     baseSegments.subList(section.fromSegmentIndex(), section.toSegmentIndexExclusive()), context);
-            Set<Long> outsideSection = new HashSet<>(allBaseIds);
-            outsideSection.removeAll(section.segmentIds());
+            Set<Long> outsideSection = segmentIdsOutside(basePath.segmentIds(), section);
             List<PathCandidate> rawPaths = routingRepository.findKShortestPaths(
                     section.startNode(),
                     section.endNode(),
@@ -272,6 +295,41 @@ public class SegmentSwapService {
         return result;
     }
 
+    private List<CourseSegmentData> applyReplacements(
+            List<CourseSegmentData> baseSegments,
+            List<SectionCandidate> replacements,
+            ThermalReferenceTime referenceTime
+    ) {
+        Map<Integer, SectionCandidate> byStartIndex = new HashMap<>();
+        replacements.forEach(candidate -> byStartIndex.put(
+                candidate.section().fromSegmentIndex(),
+                candidate
+        ));
+        List<CourseSegmentData> result = new ArrayList<>();
+        int index = 0;
+        while (index < baseSegments.size()) {
+            SectionCandidate replacement = byStartIndex.get(index);
+            if (replacement == null) {
+                result.add(baseSegments.get(index));
+                index++;
+            } else {
+                result.addAll(loadComplete(replacement.alternativeSegmentIds(), referenceTime));
+                index = replacement.section().toSegmentIndexExclusive();
+            }
+        }
+        return result;
+    }
+
+    private Set<Long> segmentIdsOutside(List<Long> baseIds, CourseSection section) {
+        Set<Long> result = new HashSet<>();
+        for (int index = 0; index < baseIds.size(); index++) {
+            if (index < section.fromSegmentIndex() || index >= section.toSegmentIndexExclusive()) {
+                result.add(baseIds.get(index));
+            }
+        }
+        return result;
+    }
+
     private List<CourseSegmentData> loadComplete(
             List<Long> segmentIds,
             ThermalReferenceTime referenceTime
@@ -284,6 +342,24 @@ public class SegmentSwapService {
             );
         }
         return segments;
+    }
+
+    private List<CourseSegmentData> withMeasuredLengths(
+            List<CourseSegmentData> segments,
+            List<BigDecimal> measuredLengthsM
+    ) {
+        if (measuredLengthsM == null || measuredLengthsM.size() != segments.size()) {
+            return segments;
+        }
+        List<CourseSegmentData> measured = new ArrayList<>(segments.size());
+        for (int index = 0; index < segments.size(); index++) {
+            BigDecimal lengthM = measuredLengthsM.get(index);
+            if (lengthM == null || lengthM.signum() <= 0) {
+                return segments;
+            }
+            measured.add(segments.get(index).withLength(lengthM));
+        }
+        return measured;
     }
 
     private CourseMetrics calculate(List<CourseSegmentData> segments, CourseCalculationContext context) {
@@ -362,6 +438,8 @@ public class SegmentSwapService {
         private SwappedSection toSwappedSection() {
             return new SwappedSection(
                     section.index(),
+                    section.fromSegmentIndex(),
+                    section.toSegmentIndexExclusive(),
                     section.segmentIds(),
                     alternativeSegmentIds,
                     temperatureImprovementC.setScale(2, RoundingMode.HALF_UP),

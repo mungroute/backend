@@ -50,6 +50,56 @@ class CourseSectionSplitterTest {
                 .isInstanceOf(CourseProcessingException.class);
     }
 
+    @Test
+    void keepsCourseConnectedWhenSameSegmentIsSplitAtWaypointBoundary() {
+        List<CourseSegmentData> waypointSplitCourse = List.of(
+                segment(45395, 1_000, 1_691),
+                segment(105789, 1_691, 1_739),
+                segment(105789, 1_691, 1_739),
+                segment(59369, 1_739, 1_745)
+        );
+
+        List<CourseSection> sections = splitter.split(waypointSplitCourse, Map.of());
+
+        assertThat(sections.stream().flatMap(section -> section.segmentIds().stream()).toList())
+                .containsExactly(45395L, 105789L, 105789L, 59369L);
+        assertThat(sections.getFirst().startNode()).isEqualTo(1_000L);
+        assertThat(sections.getLast().endNode()).isEqualTo(1_745L);
+    }
+
+    @Test
+    void preservesARealOutAndBackWhenTheFullEdgeInterpretationIsConnected() {
+        List<CourseSegmentData> outAndBackCourse = List.of(
+                segment(10, 1, 2),
+                segment(20, 2, 3),
+                segment(20, 2, 3),
+                segment(30, 2, 4)
+        );
+
+        List<CourseSection> sections = splitter.split(outAndBackCourse, Map.of());
+
+        assertThat(sections.stream().flatMap(section -> section.segmentIds().stream()).toList())
+                .containsExactly(10L, 20L, 20L, 30L);
+        assertThat(sections.getFirst().startNode()).isEqualTo(1L);
+        assertThat(sections.getLast().endNode()).isEqualTo(4L);
+        assertThat(sections.getLast().segmentIds()).containsExactly(20L, 30L);
+        assertThat(sections.getLast().startNode()).isEqualTo(3L);
+        assertThat(sections.getLast().fromSegmentIndex()).isEqualTo(2);
+    }
+
+    @Test
+    void doesNotGuessSplitDirectionForDuplicateSegmentsAtCourseBoundary() {
+        List<CourseSegmentData> ambiguousBoundary = List.of(
+                segment(20, 2, 3),
+                segment(20, 2, 3),
+                segment(30, 3, 4)
+        );
+
+        assertThatThrownBy(() -> splitter.split(ambiguousBoundary, Map.of()))
+                .isInstanceOf(CourseProcessingException.class)
+                .hasMessageContaining("방향을 확정할 수 없습니다");
+    }
+
     private List<CourseSegmentData> segments(int count) {
         return LongStream.rangeClosed(1, count)
                 .mapToObj(id -> segment(id, id, id + 1))

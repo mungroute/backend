@@ -89,10 +89,12 @@ public class WalkSessionService {
         var activeSession = walkSessionRepository.findActiveByUserIdForUpdate(userId);
         if (activeSession.isPresent()) {
             WalkSession session = activeSession.get();
-            if (requestedMode != WalkMode.OFF) {
-                if (session.getLockedMode() != null && session.getLockedMode() != requestedMode) {
-                    throw new BusinessException(WalkErrorCode.WALK_MODE_CHANGE_NOT_ALLOWED);
-                }
+            // A client may have lost its local session snapshot after an auth or
+            // page reload. In that case the server's active session is
+            // authoritative: recover it instead of rejecting a newly selected,
+            // different mode. An OFF session can still adopt its first mode.
+            if (requestedMode != WalkMode.OFF
+                    && (session.getLockedMode() == null || session.getLockedMode() == requestedMode)) {
                 session.enablePresenceMode(requestedMode);
             }
             if (session.isPaused()) {

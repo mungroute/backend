@@ -89,6 +89,9 @@ public class CourseDiagnosticService {
         }
 
         List<BigDecimal> lengths = effectiveLengths(course, rows);
+        CourseLegResolver.Resolution legResolution = resolveLegSequences(course, lengths, rows.size());
+        lengths = legResolver.reconcileWithGeometry(lengths, legResolution);
+        List<Integer> legSequences = legResolution.legSequences();
         List<CourseSegmentData> thermalInputs = new ArrayList<>(rows.size());
         for (int index = 0; index < rows.size(); index++) {
             CourseDiagnosticSegmentRow row = rows.get(index);
@@ -110,8 +113,6 @@ public class CourseDiagnosticService {
             }
             rows = resolvedRows;
         }
-        CourseLegResolver.Resolution legResolution = resolveLegSequences(course, lengths, rows.size());
-        List<Integer> legSequences = legResolution.legSequences();
         List<JsonNode> slicedRoutes = routeSlicer.split(
                 course.routeGeoJson(), lengths, legResolution.reverseRoute()
         );

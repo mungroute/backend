@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,6 +19,26 @@ class RedisPresenceLocationStoreIntegrationTest {
 
     @Autowired
     PresenceLocationStore store;
+
+    @Autowired
+    StringRedisTemplate redisTemplate;
+
+    @Test
+    void boundsCachedSessionAuthorizationToTheLocationFreshnessWindow() {
+        long sessionId = ThreadLocalRandom.current().nextLong(1_000_000, 10_000_000);
+        try {
+            store.cacheSession(new PresenceSessionState(sessionId, 101L, "meet"));
+
+            assertThat(store.findSession(sessionId))
+                    .contains(new PresenceSessionState(sessionId, 101L, "meet"));
+            assertThat(redisTemplate.getExpire(
+                    RedisPresenceLocationStore.AUTH_SESSION_KEY_PREFIX + sessionId,
+                    TimeUnit.SECONDS
+            )).isBetween(1L, 30L);
+        } finally {
+            store.delete(sessionId);
+        }
+    }
 
     @Test
     void distinguishesEntryContinuousPresenceAndExit() {

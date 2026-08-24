@@ -1,13 +1,18 @@
 package com.mungroute.meet.service;
 
+import com.mungroute.global.exception.BusinessException;
 import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
 import com.mungroute.proximity.repository.PresenceRepository;
+import com.mungroute.proximity.exception.PresenceErrorCode;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.proximity.store.PresenceSessionState;
+import com.mungroute.user.domain.AppUser;
+import com.mungroute.walk.domain.WalkMode;
+import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,8 +25,13 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -53,6 +63,51 @@ class MeetPresenceServiceTest {
         assertThat(response.candidates().getFirst().distanceBand()).isNotBlank();
         assertThat(response.candidates().getFirst().preview().profileImageUrl()).isEqualTo("/cookie.jpg");
         assertThat(response.candidates().getFirst().preview().leashGreeting()).isEqualTo("LIKES");
+    }
+
+    @Test
+    void repopulatesTheSessionCacheAfterAColdDatabaseValidation() {
+        MeetPresenceService service = new MeetPresenceService(walkSessionRepository, presenceRepository, locationStore, meetRepository);
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+        when(locationStore.findSession(10L)).thenReturn(Optional.empty());
+        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(1L);
+        when(session.isActive()).thenReturn(true);
+        when(session.isPaused()).thenReturn(false);
+        when(session.getMode()).thenReturn(WalkMode.MEET);
+        when(presenceRepository.hasConsent(10L)).thenReturn(true);
+        when(meetRepository.findProfile(1L)).thenReturn(Optional.of(profile(1L, "콩이")));
+        when(presenceRepository.updateTelemetry(anyLong(), any(), any(), anyBoolean(), any()))
+                .thenReturn(1);
+        when(meetRepository.findAcceptedForSession(10L)).thenReturn(Optional.empty());
+        when(locationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt())).thenReturn(List.of());
+
+        service.update(1L, request(10L));
+
+        verify(locationStore).cacheSession(new PresenceSessionState(10L, 1L, "meet"));
+    }
+
+    @Test
+    void doesNotCacheAnInactiveSessionAfterColdValidation() {
+        MeetPresenceService service = new MeetPresenceService(
+                walkSessionRepository, presenceRepository, locationStore, meetRepository);
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+        when(locationStore.findSession(10L)).thenReturn(Optional.empty());
+        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(1L);
+        when(session.isActive()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.update(1L, request(10L)))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED));
+
+        verify(locationStore, never()).cacheSession(any(PresenceSessionState.class));
+        verify(locationStore, never()).update(any(PresenceLocation.class));
     }
 
     private PresenceUpdateRequest request(long sessionId) {

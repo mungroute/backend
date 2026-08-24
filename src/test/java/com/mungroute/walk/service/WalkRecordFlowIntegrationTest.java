@@ -233,7 +233,8 @@ class WalkRecordFlowIntegrationTest {
         var started = sessionService.startWalk(userId, new StartWalkRequest("distance"));
 
         assertThat(started.sessionId()).isEqualTo(orphanedSessionId);
-        assertThat(started.mode()).isEqualTo("off");
+        assertThat(started.mode()).isEqualTo("distance");
+        assertThat(started.lockedMode()).isEqualTo("distance");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM walk_session WHERE session_id = ?",
                 Integer.class,
@@ -257,7 +258,8 @@ class WalkRecordFlowIntegrationTest {
         var started = sessionService.startWalk(userId, new StartWalkRequest("distance"));
 
         assertThat(started.sessionId()).isEqualTo(sessionId);
-        assertThat(started.mode()).isEqualTo("off");
+        assertThat(started.mode()).isEqualTo("distance");
+        assertThat(started.lockedMode()).isEqualTo("distance");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM walk_track_point WHERE session_id = ?",
                 Integer.class,

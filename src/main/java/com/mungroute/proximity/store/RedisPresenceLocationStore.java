@@ -57,7 +57,8 @@ public class RedisPresenceLocationStore implements PresenceLocationStore {
     static final String MEET_CANDIDATE_KEY_PREFIX = "meet:candidate:";
     static final String MEET_CANDIDATE_PAIR_KEY_PREFIX = "meet:candidate-pair:";
     private static final Duration LOCATION_TTL = Duration.ofSeconds(30);
-    private static final Duration SESSION_CACHE_TTL = Duration.ofMinutes(30);
+    // 종료/일시정지 무효화가 일시적으로 실패해도 오래된 권한 캐시를 오래 신뢰하지 않는다.
+    private static final Duration SESSION_CACHE_TTL = LOCATION_TTL;
     private static final Duration HISTORY_TTL = Duration.ofSeconds(60);
     private static final Duration NEARBY_TTL = Duration.ofSeconds(30);
 

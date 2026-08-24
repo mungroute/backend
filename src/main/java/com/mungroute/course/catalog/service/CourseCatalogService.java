@@ -133,6 +133,7 @@ public class CourseCatalogService {
         }
         var result = segmentSwapService.recommend(
                 new CoursePath(row.segmentIds()),
+                row.segmentLengthsM(),
                 context,
                 Math.max(1, usualMetrics.durationMin()),
                 COMPARISON_DETOUR_RATIO
@@ -155,8 +156,12 @@ public class CourseCatalogService {
                 alternative.lengthM().subtract(usual.lengthM()),
                 result.swappedSections().stream().map(section -> new SwappedSectionResponse(
                         section.sectionIndex(),
+                        section.fromSegmentIndex(),
+                        section.toSegmentIndexExclusive(),
                         section.originalSegmentIds(),
                         section.alternativeSegmentIds(),
+                        parseGeoJson(catalogRepository.routeGeoJson(section.originalSegmentIds())),
+                        parseGeoJson(catalogRepository.routeGeoJson(section.alternativeSegmentIds())),
                         section.temperatureImprovementC(),
                         section.addedLengthM()
                 )).toList(),

@@ -34,23 +34,70 @@ public class CourseSectionSplitter {
     }
 
     private List<OrientedSegment> orient(List<CourseSegmentData> segments) {
-        CourseSegmentData first = segments.getFirst();
-        CourseSegmentData second = segments.get(1);
-        long shared = sharedNode(first, second);
-        long start = otherNode(first, shared);
-        List<OrientedSegment> result = new ArrayList<>();
-        result.add(new OrientedSegment(first, start, shared));
-        long cursor = shared;
-        for (int index = 1; index < segments.size(); index++) {
-            CourseSegmentData segment = segments.get(index);
-            if (segment.source() != cursor && segment.target() != cursor) {
-                throw disconnected("코스 링크 순서가 연결되어 있지 않습니다.");
-            }
-            long next = otherNode(segment, cursor);
-            result.add(new OrientedSegment(segment, cursor, next));
-            cursor = next;
+        if (sameUndirectedSegment(segments.getFirst(), segments.get(1))
+                || sameUndirectedSegment(segments.get(segments.size() - 2), segments.getLast())) {
+            throw disconnected("코스 경계의 반복 링크 방향을 확정할 수 없습니다.");
         }
-        return result;
+        CourseSegmentData first = segments.getFirst();
+        for (long start : List.of(first.source(), first.target())) {
+            List<OrientedSegment> result = orientFrom(
+                    segments,
+                    0,
+                    start,
+                    new HashSet<>()
+            );
+            if (result != null) {
+                return result;
+            }
+        }
+        throw disconnected("코스 링크 순서가 연결되어 있지 않습니다.");
+    }
+
+    private List<OrientedSegment> orientFrom(
+            List<CourseSegmentData> segments,
+            int index,
+            long cursor,
+            Set<OrientationState> failed
+    ) {
+        if (index == segments.size()) {
+            return new ArrayList<>();
+        }
+        OrientationState state = new OrientationState(index, cursor);
+        if (failed.contains(state)) {
+            return null;
+        }
+
+        CourseSegmentData segment = segments.get(index);
+        if (!touches(segment, cursor)) {
+            failed.add(state);
+            return null;
+        }
+        long next = otherNode(segment, cursor);
+
+        List<OrientedSegment> normallyOriented = orientFrom(segments, index + 1, next, failed);
+        if (normallyOriented != null) {
+            normallyOriented.addFirst(new OrientedSegment(
+                    List.of(segment), index, index + 1, cursor, next
+            ));
+            return normallyOriented;
+        }
+
+        if (isInternalDuplicatePair(segments, index)) {
+            List<OrientedSegment> splitThrough = orientFrom(segments, index + 2, next, failed);
+            if (splitThrough != null) {
+                splitThrough.addFirst(new OrientedSegment(
+                        List.of(segment, segments.get(index + 1)),
+                        index,
+                        index + 2,
+                        cursor,
+                        next
+                ));
+                return splitThrough;
+            }
+        }
+
+        failed.add(state);
+        return null;
     }
 
     private List<CourseSection> splitAtIntersections(
@@ -148,14 +195,18 @@ public class CourseSectionSplitter {
 
     private CourseSection section(int index, List<OrientedSegment> segments, int from, int to) {
         List<OrientedSegment> slice = segments.subList(from, to);
-        List<Long> ids = slice.stream().map(value -> value.segment().segmentId()).toList();
+        List<Long> ids = slice.stream()
+                .flatMap(value -> value.segments().stream())
+                .map(CourseSegmentData::segmentId)
+                .toList();
         BigDecimal length = slice.stream()
-                .map(value -> value.segment().lengthM())
+                .flatMap(value -> value.segments().stream())
+                .map(CourseSegmentData::lengthM)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new CourseSection(
                 index,
-                from,
-                to,
+                slice.getFirst().fromSegmentIndex(),
+                slice.getLast().toSegmentIndexExclusive(),
                 slice.getFirst().from(),
                 slice.getLast().to(),
                 ids,
@@ -163,17 +214,26 @@ public class CourseSectionSplitter {
         );
     }
 
-    private long sharedNode(CourseSegmentData left, CourseSegmentData right) {
-        Set<Long> leftNodes = new HashSet<>();
-        leftNodes.add(left.source());
-        leftNodes.add(left.target());
-        if (leftNodes.contains(right.source())) {
-            return right.source();
+    private boolean touches(CourseSegmentData segment, long node) {
+        return segment.source() == node || segment.target() == node;
+    }
+
+    private boolean sameUndirectedSegment(CourseSegmentData left, CourseSegmentData right) {
+        return left.segmentId() == right.segmentId()
+                && (left.source() == right.source() && left.target() == right.target()
+                || left.source() == right.target() && left.target() == right.source());
+    }
+
+    private boolean isInternalDuplicatePair(List<CourseSegmentData> segments, int index) {
+        if (index == 0 || index + 2 >= segments.size()) {
+            return false;
         }
-        if (leftNodes.contains(right.target())) {
-            return right.target();
+        CourseSegmentData current = segments.get(index);
+        if (!sameUndirectedSegment(current, segments.get(index + 1))) {
+            return false;
         }
-        throw disconnected("첫 두 코스 링크가 연결되어 있지 않습니다.");
+        return !sameUndirectedSegment(segments.get(index - 1), current)
+                && !sameUndirectedSegment(current, segments.get(index + 2));
     }
 
     private long otherNode(CourseSegmentData segment, long node) {
@@ -190,6 +250,18 @@ public class CourseSectionSplitter {
         return new CourseProcessingException(AlternativeReason.COURSE_NOT_CONNECTED, message);
     }
 
-    private record OrientedSegment(CourseSegmentData segment, long from, long to) {
+    private record OrientationState(int segmentIndex, long cursor) {
+    }
+
+    private record OrientedSegment(
+            List<CourseSegmentData> segments,
+            int fromSegmentIndex,
+            int toSegmentIndexExclusive,
+            long from,
+            long to
+    ) {
+        private OrientedSegment {
+            segments = List.copyOf(segments);
+        }
     }
 }
