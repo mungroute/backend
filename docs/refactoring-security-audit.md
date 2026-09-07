@@ -109,6 +109,23 @@ payloads, and existing database data remain compatibility constraints.
   `GroupFlowIntegrationTest`, and `RouteThermalRepositoryIntegrationTest` pass
   against a schema-only database without using the data-pipeline.
 
+### Redis outage rolled back a durable walk pause
+
+- Reproduction: start an `off` walk with PostgreSQL available and Redis
+  unavailable, then call `POST /api/walks/{sessionId}/pause`.
+- Impact: the Presence cache deletion raised a Redis infrastructure exception,
+  returning HTTP 500 and rolling back the durable pause transition.
+- Severity: High because an optional realtime dependency could prevent a core
+  walk lifecycle operation during an outage.
+- Fix: the Proximity adapter translates Redis connection failures into a
+  port-owned availability exception. Pause and mode-off transitions commit their
+  durable database state and tolerate only that bounded cache outage; stale
+  Presence keys expire within 30 seconds. Durable end cleanup still observes the
+  exception and retries it through the outbox.
+- Regression tests: `WalkSessionServiceTest`; a live HTTP smoke test with Redis
+  unavailable verified `ACTIVE -> PAUSED -> ACTIVE -> ENDED` and repeated-end
+  idempotency.
+
 ## Verified controls
 
 - Refresh-cookie requests from an unapproved Origin are rejected by the CORS

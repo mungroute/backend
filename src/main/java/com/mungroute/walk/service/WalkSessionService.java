@@ -24,8 +24,11 @@ import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
 import com.mungroute.walk.port.WalkMapMatchingPort;
 import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkPresenceUnavailableException;
 import com.mungroute.walk.port.WalkUserPort;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -33,6 +36,7 @@ import java.time.Duration;
 
 @Service
 public class WalkSessionService {
+    private static final Logger log = LoggerFactory.getLogger(WalkSessionService.class);
     private final WalkUserPort userPort;
     private final WalkSessionRepository walkSessionRepository;
     private final WalkTrackPointRepository walkTrackPointRepository;
@@ -251,7 +255,13 @@ public class WalkSessionService {
         validateOwner(session, userId);
         stateMachine.transition(session, WalkLifecycleEvent.PAUSE);
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
-        presencePort.pause(sessionId, changedAt);
+        try {
+            presencePort.pause(sessionId, changedAt);
+        } catch (WalkPresenceUnavailableException exception) {
+            // Presence keys expire after 30 seconds. The durable PAUSED state is
+            // authoritative and must not be rolled back by a temporary Redis outage.
+            log.warn("Realtime presence cleanup deferred by cache outage for walk session {}", sessionId);
+        }
         meetPort.closeForSession(userId, sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
     }
@@ -285,7 +295,13 @@ public class WalkSessionService {
         session.changeMode(nextMode);
 
         if (nextMode == WalkMode.OFF) {
-            presencePort.remove(sessionId);
+            try {
+                presencePort.remove(sessionId);
+            } catch (WalkPresenceUnavailableException exception) {
+                // The database record was removed first and the remaining cache
+                // entry has a bounded TTL, so the durable mode change can commit.
+                log.warn("Realtime presence cleanup deferred by cache outage for walk session {}", sessionId);
+            }
             meetPort.closeForSession(userId, sessionId);
         } else {
             // 동의가 끝난 세션에 대해서만 active_presence 행이 존재한다.

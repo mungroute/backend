@@ -4,6 +4,8 @@ import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkPresenceUnavailableException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
@@ -30,33 +32,49 @@ public class WalkPresenceAdapter implements WalkPresencePort {
             double accuracyMeters,
             OffsetDateTime recordedAt
     ) {
-        presenceLocationStore.update(new PresenceLocation(
-                sessionId,
-                userId,
-                "off",
-                longitude,
-                latitude,
-                accuracyMeters,
-                null,
-                false,
-                recordedAt
-        ));
+        try {
+            presenceLocationStore.update(new PresenceLocation(
+                    sessionId,
+                    userId,
+                    "off",
+                    longitude,
+                    latitude,
+                    accuracyMeters,
+                    null,
+                    false,
+                    recordedAt
+            ));
+        } catch (RedisConnectionFailureException exception) {
+            throw unavailable(exception);
+        }
     }
 
     @Override
     public void remove(long sessionId) {
         presenceRepository.deleteBySessionId(sessionId);
-        presenceLocationStore.delete(sessionId);
+        deleteRealtimePresence(sessionId);
     }
 
     @Override
     public void pause(long sessionId, OffsetDateTime pausedAt) {
         presenceRepository.endAllProximityEvents(sessionId, pausedAt);
-        presenceLocationStore.delete(sessionId);
+        deleteRealtimePresence(sessionId);
     }
 
     @Override
     public void updateMode(long sessionId, String mode, OffsetDateTime changedAt) {
         presenceRepository.updateMode(sessionId, mode, changedAt);
+    }
+
+    private void deleteRealtimePresence(long sessionId) {
+        try {
+            presenceLocationStore.delete(sessionId);
+        } catch (RedisConnectionFailureException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    private WalkPresenceUnavailableException unavailable(RedisConnectionFailureException cause) {
+        return new WalkPresenceUnavailableException("Realtime presence store is unavailable", cause);
     }
 }

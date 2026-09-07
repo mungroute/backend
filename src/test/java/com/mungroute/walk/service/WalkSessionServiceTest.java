@@ -11,6 +11,7 @@ import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
 import com.mungroute.walk.port.WalkMapMatchingPort;
 import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkPresenceUnavailableException;
 import com.mungroute.walk.port.WalkUserPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -304,6 +305,62 @@ class WalkSessionServiceTest {
                 org.mockito.ArgumentMatchers.eq(sessionId),
                 any(OffsetDateTime.class)
         );
+        verify(meetPort).closeForSession(userId, sessionId);
+    }
+
+    @Test
+    void pauseCommitsDurableStateWhenRealtimePresenceStoreIsUnavailable() {
+        long userId = 1L;
+        long sessionId = 27L;
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(userId);
+        org.mockito.Mockito.doThrow(new WalkPresenceUnavailableException(
+                        "Realtime presence store is unavailable",
+                        new RuntimeException("offline")
+                ))
+                .when(presencePort)
+                .pause(org.mockito.ArgumentMatchers.eq(sessionId), any(OffsetDateTime.class));
+
+        var response = walkSessionService.pauseWalk(userId, sessionId);
+
+        assertThat(response.status()).isEqualTo("PAUSED");
+        verify(walkSessionRepository).pauseWalkSession(
+                org.mockito.ArgumentMatchers.eq(sessionId),
+                any(OffsetDateTime.class)
+        );
+        verify(meetPort).closeForSession(userId, sessionId);
+    }
+
+    @Test
+    void changeModeToOffCommitsWhenRealtimePresenceStoreIsUnavailable() {
+        long userId = 1L;
+        long sessionId = 27L;
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(userId);
+        when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
+        org.mockito.Mockito.doThrow(new WalkPresenceUnavailableException(
+                        "Realtime presence store is unavailable",
+                        new RuntimeException("offline")
+                ))
+                .when(presencePort)
+                .remove(sessionId);
+
+        var response = walkSessionService.changeMode(
+                userId,
+                sessionId,
+                new ChangeWalkModeRequest("off")
+        );
+
+        assertThat(response.mode()).isEqualTo("off");
+        verify(session).changeMode(WalkMode.OFF);
         verify(meetPort).closeForSession(userId, sessionId);
     }
 
