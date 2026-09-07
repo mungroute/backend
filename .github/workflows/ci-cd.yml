@@ -73,7 +73,7 @@ jobs:
         run: ./gradlew clean test bootJar --no-daemon
 
       - name: Scan committed content for secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
 
       - name: Review dependency changes
         if: github.event_name == 'pull_request'
