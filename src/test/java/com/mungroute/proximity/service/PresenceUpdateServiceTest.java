@@ -7,10 +7,8 @@ import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.NearbyPresenceTransition;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.user.domain.AppUser;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +34,7 @@ import static org.mockito.Mockito.when;
 class PresenceUpdateServiceTest {
 
     @Mock
-    WalkSessionRepository walkSessionRepository;
+    WalkSessionAccessPort walkSessionPort;
     @Mock
     PresenceRepository presenceRepository;
     @Mock
@@ -46,15 +44,14 @@ class PresenceUpdateServiceTest {
     void distanceModeReturnsCoarseApproachInformationForEveryWalkMode() {
         long userId = 1L;
         long sessionId = 27L;
-        WalkSession session = ownedDistanceSession(userId);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         PresenceUpdateService service = new PresenceUpdateService(
-                walkSessionRepository,
+                walkSessionPort,
                 presenceRepository,
                 presenceLocationStore,
                 new PresenceMetrics(registry)
         );
-        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+        when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(ownedDistanceSession(sessionId, userId)));
         when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
         when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
         when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
@@ -99,10 +96,9 @@ class PresenceUpdateServiceTest {
         long userId = 1L;
         long sessionId = 27L;
         PresenceUpdateService service = new PresenceUpdateService(
-                walkSessionRepository, presenceRepository, presenceLocationStore,
+                walkSessionPort, presenceRepository, presenceLocationStore,
                 new PresenceMetrics(new SimpleMeterRegistry()));
-        WalkSession session = ownedDistanceSession(userId);
-        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+        when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(ownedDistanceSession(sessionId, userId)));
         when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
         when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
         when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
@@ -138,11 +134,10 @@ class PresenceUpdateServiceTest {
     void doesNotDuplicateAContinuousNearbyNotification() {
         long userId = 1L;
         long sessionId = 27L;
-        WalkSession session = ownedDistanceSession(userId);
         PresenceUpdateService service = new PresenceUpdateService(
-                walkSessionRepository, presenceRepository, presenceLocationStore,
+                walkSessionPort, presenceRepository, presenceLocationStore,
                 new PresenceMetrics(new SimpleMeterRegistry()));
-        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+        when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(ownedDistanceSession(sessionId, userId)));
         when(presenceLocationStore.findSession(sessionId)).thenReturn(Optional.empty());
         when(presenceRepository.hasConsent(sessionId)).thenReturn(true);
         when(presenceRepository.updateTelemetry(any(Long.class), any(), any(), any(Boolean.class), any()))
@@ -166,7 +161,7 @@ class PresenceUpdateServiceTest {
         long userId = 1L;
         long sessionId = 27L;
         PresenceUpdateService service = new PresenceUpdateService(
-                walkSessionRepository,
+                walkSessionPort,
                 presenceRepository,
                 presenceLocationStore,
                 new PresenceMetrics(new SimpleMeterRegistry())
@@ -177,15 +172,8 @@ class PresenceUpdateServiceTest {
         )).isInstanceOf(BusinessException.class);
     }
 
-    private WalkSession ownedDistanceSession(long userId) {
-        AppUser user = org.mockito.Mockito.mock(AppUser.class);
-        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
-        when(user.getUserId()).thenReturn(userId);
-        when(session.getUser()).thenReturn(user);
-        when(session.isActive()).thenReturn(true);
-        when(session.isPaused()).thenReturn(false);
-        when(session.getMode()).thenReturn(WalkMode.DISTANCE);
-        return session;
+    private WalkSessionSnapshot ownedDistanceSession(long sessionId, long userId) {
+        return new WalkSessionSnapshot(sessionId, userId, true, false, "distance");
     }
 
     private PresenceUpdateRequest request(long sessionId, OffsetDateTime measuredAt) {

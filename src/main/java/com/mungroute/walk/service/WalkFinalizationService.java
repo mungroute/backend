@@ -4,6 +4,7 @@ import com.mungroute.global.exception.BusinessException;
 import com.mungroute.walk.domain.WalkMatchStatus;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
+import com.mungroute.walk.repository.WalkCleanupOutboxRepository;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,9 +14,14 @@ import java.time.OffsetDateTime;
 @Service
 public class WalkFinalizationService {
     private final WalkSessionRepository walkSessionRepository;
+    private final WalkCleanupOutboxRepository cleanupOutboxRepository;
 
-    public WalkFinalizationService(WalkSessionRepository walkSessionRepository) {
+    public WalkFinalizationService(
+            WalkSessionRepository walkSessionRepository,
+            WalkCleanupOutboxRepository cleanupOutboxRepository
+    ) {
         this.walkSessionRepository = walkSessionRepository;
+        this.cleanupOutboxRepository = cleanupOutboxRepository;
     }
 
     @Transactional
@@ -29,6 +35,10 @@ public class WalkFinalizationService {
             walkSessionRepository.finalizeWalkSession(sessionId, endedAt);
             finalizedNow = true;
         }
+        // The task is inserted in the same transaction as finalization. If either
+        // write rolls back, neither an ended walk nor an orphan cleanup task remains.
+        // ON CONFLICT makes repeated end requests safe and preserves completion.
+        cleanupOutboxRepository.enqueue(userId, sessionId, endedAt);
         return new FinalizationResult(finalizedNow, existingStatus == WalkMatchStatus.NOT_PERFORMED);
     }
 

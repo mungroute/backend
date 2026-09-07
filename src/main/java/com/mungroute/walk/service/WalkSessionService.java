@@ -7,8 +7,6 @@ import com.mungroute.course.matching.MapMatchingResult;
 import com.mungroute.course.matching.MapMatchingStatus;
 import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
-import com.mungroute.user.repository.AppUserRepository;
-import com.mungroute.user.service.DogProfileService;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
@@ -24,6 +22,7 @@ import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
 import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkUserPort;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -32,7 +31,7 @@ import java.time.Duration;
 
 @Service
 public class WalkSessionService {
-    private final AppUserRepository appUserRepository;
+    private final WalkUserPort userPort;
     private final WalkSessionRepository walkSessionRepository;
     private final WalkTrackPointRepository walkTrackPointRepository;
     private final WalkFinalizationService walkFinalizationService;
@@ -41,11 +40,10 @@ public class WalkSessionService {
     private final ObjectMapper objectMapper;
     private final WalkPresencePort presencePort;
     private final WalkMeetPort meetPort;
-    private final DogProfileService dogProfileService;
     private final WalkSessionCleanup sessionCleanup;
 
     public WalkSessionService(
-            AppUserRepository appUserRepository,
+            WalkUserPort userPort,
             WalkSessionRepository walkSessionRepository,
             WalkTrackPointRepository walkTrackPointRepository,
             WalkFinalizationService walkFinalizationService,
@@ -54,10 +52,9 @@ public class WalkSessionService {
             ObjectMapper objectMapper,
             WalkPresencePort presencePort,
             WalkMeetPort meetPort,
-            DogProfileService dogProfileService,
             WalkSessionCleanup sessionCleanup
     ) {
-        this.appUserRepository = appUserRepository;
+        this.userPort = userPort;
         this.walkSessionRepository = walkSessionRepository;
         this.walkTrackPointRepository = walkTrackPointRepository;
         this.walkFinalizationService = walkFinalizationService;
@@ -66,14 +63,13 @@ public class WalkSessionService {
         this.objectMapper = objectMapper;
         this.presencePort = presencePort;
         this.meetPort = meetPort;
-        this.dogProfileService = dogProfileService;
         this.sessionCleanup = sessionCleanup;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
     @Transactional
     public StartWalkResponse startWalk(Long userId, StartWalkRequest request) {
-        AppUser user = appUserRepository
+        AppUser user = userPort
                 .findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(
@@ -100,7 +96,7 @@ public class WalkSessionService {
                 walkSessionRepository.resumeWalkSession(session.getSessionId(), OffsetDateTime.now());
             }
             if (!request.dogIds().isEmpty()) {
-                dogProfileService.attachToWalk(userId, session.getSessionId(), request.dogIds());
+                userPort.attachDogs(userId, session.getSessionId(), request.dogIds());
             }
             return StartWalkResponse.from(session);
         }
@@ -115,7 +111,7 @@ public class WalkSessionService {
         WalkSession savedSession = walkSessionRepository.save(walkSession);
 
         if (!request.dogIds().isEmpty()) {
-            dogProfileService.attachToWalk(userId, savedSession.getSessionId(), request.dogIds());
+            userPort.attachDogs(userId, savedSession.getSessionId(), request.dogIds());
         }
 
         return StartWalkResponse.from(savedSession);
@@ -242,7 +238,10 @@ public class WalkSessionService {
                         )
                 );
 
-        sessionCleanup.cleanup(userId, sessionId);
+        // Cleanup is attempted immediately for the common path. A durable outbox
+        // owns retries, so a transient Redis/Meet outage cannot turn a committed
+        // walk end into a client-visible failure.
+        sessionCleanup.cleanupNow(sessionId);
 
         return EndWalkResponse.from(summary, objectMapper);
     }

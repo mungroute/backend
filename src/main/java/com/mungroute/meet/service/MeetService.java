@@ -10,10 +10,9 @@ import com.mungroute.meet.exception.MeetErrorCode;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -29,14 +28,14 @@ import java.util.UUID;
 public class MeetService {
     private static final Duration REQUEST_TTL = Duration.ofMinutes(2);
     private final MeetRepository meetRepository;
-    private final WalkSessionRepository walkSessionRepository;
+    private final WalkSessionAccessPort walkSessionPort;
     private final PresenceLocationStore locationStore;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public MeetService(MeetRepository meetRepository, WalkSessionRepository walkSessionRepository,
+    public MeetService(MeetRepository meetRepository, WalkSessionAccessPort walkSessionPort,
                        PresenceLocationStore locationStore, SimpMessagingTemplate messagingTemplate) {
         this.meetRepository = meetRepository;
-        this.walkSessionRepository = walkSessionRepository;
+        this.walkSessionPort = walkSessionPort;
         this.locationStore = locationStore;
         this.messagingTemplate = messagingTemplate;
     }
@@ -52,12 +51,12 @@ public class MeetService {
 
     @Transactional
     public MeetRequestResponse create(long userId, long sessionId, String candidateRef) {
-        WalkSession own = ownedMeetSession(userId, sessionId);
+        WalkSessionSnapshot own = ownedMeetSession(userId, sessionId);
         var candidate = locationStore.resolveMeetCandidateRef(sessionId, candidateRef)
                 .orElseThrow(() -> new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED));
         var targetState = locationStore.findSession(candidate.sessionId())
                 .orElseThrow(() -> new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED));
-        if (!WalkMode.MEET.getValue().equals(targetState.mode()) || candidate.userId() != targetState.userId()) {
+        if (!"meet".equals(targetState.mode()) || candidate.userId() != targetState.userId()) {
             throw new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED);
         }
         if (meetRepository.findProfile(userId).isEmpty()) throw new BusinessException(MeetErrorCode.PROFILE_REQUIRED);
@@ -65,7 +64,7 @@ public class MeetService {
         UUID requestId = UUID.randomUUID();
         OffsetDateTime expiresAt = OffsetDateTime.now().plus(REQUEST_TTL);
         try {
-            meetRepository.createRequest(requestId, own.getSessionId(), candidate.sessionId(), userId, candidate.userId(), expiresAt);
+            meetRepository.createRequest(requestId, own.sessionId(), candidate.sessionId(), userId, candidate.userId(), expiresAt);
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessException(MeetErrorCode.REQUEST_ALREADY_ACTIVE);
         }
@@ -179,11 +178,11 @@ public class MeetService {
         return meetRepository.findRequest(requestId).orElseThrow(() -> new BusinessException(MeetErrorCode.REQUEST_NOT_FOUND));
     }
 
-    private WalkSession ownedMeetSession(long userId, long sessionId) {
-        WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
+    private WalkSessionSnapshot ownedMeetSession(long userId, long sessionId) {
+        WalkSessionSnapshot session = walkSessionPort.findForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
-        if (!session.getUser().getUserId().equals(userId)) throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
-        if (!session.isActive() || session.isPaused() || session.getMode() != WalkMode.MEET) {
+        if (session.userId() != userId) throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
+        if (!session.active() || session.paused() || !"meet".equals(session.mode())) {
             throw new BusinessException(MeetErrorCode.REQUEST_STATE_INVALID);
         }
         return session;

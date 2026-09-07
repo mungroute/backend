@@ -10,10 +10,8 @@ import com.mungroute.proximity.dto.response.SafeDetourPointResponse;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.user.domain.AppUser;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +35,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class SafeDetourServiceTest {
-    @Mock WalkSessionRepository walkSessionRepository;
+    @Mock WalkSessionAccessPort walkSessionPort;
     @Mock PresenceLocationStore presenceLocationStore;
     @Mock CourseDrawRepository courseDrawRepository;
     @Mock SafeDetourRouteRepository routeRepository;
@@ -50,15 +48,10 @@ class SafeDetourServiceTest {
     @BeforeEach
     void setUp() {
         service = new SafeDetourService(
-                walkSessionRepository, presenceLocationStore, courseDrawRepository, routeRepository);
-        AppUser user = mock(AppUser.class);
-        WalkSession session = mock(WalkSession.class);
-        when(user.getUserId()).thenReturn(userId);
-        when(session.getUser()).thenReturn(user);
-        when(session.isActive()).thenReturn(true);
-        when(session.isPaused()).thenReturn(false);
-        when(session.getMode()).thenReturn(WalkMode.DISTANCE);
-        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+                walkSessionPort, presenceLocationStore, courseDrawRepository, routeRepository);
+        when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(sessionId, userId, true, false, "distance")
+        ));
         origin = new PresenceLocation(sessionId, userId, "distance",
                 126.9780, 37.5665, 5, 0.0, false, OffsetDateTime.now());
     }

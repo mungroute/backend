@@ -63,9 +63,12 @@ payloads, and existing database data remain compatibility constraints.
 - Reproduction: make Redis presence removal fail while ending a walk.
 - Impact: Meet cleanup was never attempted, leaving more stale realtime state.
 - Severity: Medium.
-- Fix: `WalkSessionCleanup` attempts both ports, preserves both failures, and keeps
-  the end operation retryable.
-- Regression tests: `WalkSessionCleanupTest`.
+- Fix: finalization now inserts a cleanup task in the same transaction. The worker
+  checkpoints Presence and Meet independently, uses a lease for multi-instance
+  safety, and retries failures with bounded exponential backoff. A cleanup outage
+  no longer changes the already committed end response.
+- Regression tests: `WalkSessionCleanupTest`, `WalkFinalizationServiceTest`, and
+  the outbox assertion in `WalkRecordFlowIntegrationTest`.
 
 ### Representative-course updates were not serialized across sources
 
@@ -87,6 +90,8 @@ payloads, and existing database data remain compatibility constraints.
 - Production health details are hidden and Swagger/API docs are disabled by default.
 - Course/walk deletion checks group sharing through consumer-owned ports.
 - Course matching no longer depends on walk-domain status types.
+- Walk services reach user persistence through `WalkUserPort`; Meet and Proximity
+  authorize sessions through the immutable `WalkSessionSnapshot` port.
 - Static `innerHTML` uses in the frontend contain only code-owned markup; no user
   input reaches those sinks.
 
@@ -95,10 +100,6 @@ payloads, and existing database data remain compatibility constraints.
 These items were not classified as critical/high based on the current evidence and
 remain explicit follow-ups:
 
-- Add an outbox/retry worker for cleanup failures so recovery does not depend on an
-  API retry (Medium).
-- Move remaining walk-to-user and meet/proximity-to-walk persistence references to
-  application ports, then broaden `ArchitectureBoundaryTest` (Medium).
 - Split the remaining `CourseCatalogService` query/comparison metric assembly after
   the current comparison changes are checkpointed; representative and deletion
   use cases are already separate (Medium).

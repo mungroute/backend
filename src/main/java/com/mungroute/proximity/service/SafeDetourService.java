@@ -13,10 +13,9 @@ import com.mungroute.proximity.exception.PresenceErrorCode;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -42,18 +41,18 @@ public class SafeDetourService {
     private static final int RESULT_VALID_SECONDS = 10;
     private static final int RETRY_AFTER_SECONDS = 25;
 
-    private final WalkSessionRepository walkSessionRepository;
+    private final WalkSessionAccessPort walkSessionPort;
     private final PresenceLocationStore presenceLocationStore;
     private final CourseDrawRepository courseDrawRepository;
     private final SafeDetourRouteRepository routeRepository;
 
     public SafeDetourService(
-            WalkSessionRepository walkSessionRepository,
+            WalkSessionAccessPort walkSessionPort,
             PresenceLocationStore presenceLocationStore,
             CourseDrawRepository courseDrawRepository,
             SafeDetourRouteRepository routeRepository
     ) {
-        this.walkSessionRepository = walkSessionRepository;
+        this.walkSessionPort = walkSessionPort;
         this.presenceLocationStore = presenceLocationStore;
         this.courseDrawRepository = courseDrawRepository;
         this.routeRepository = routeRepository;
@@ -171,15 +170,15 @@ public class SafeDetourService {
     }
 
     private void validateSession(long userId, long sessionId) {
-        WalkSession session = walkSessionRepository.findById(sessionId)
+        WalkSessionSnapshot session = walkSessionPort.find(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
-        if (!session.getUser().getUserId().equals(userId)) {
+        if (session.userId() != userId) {
             throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
         }
-        if (!session.isActive() || session.isPaused()) {
+        if (!session.active() || session.paused()) {
             throw new BusinessException(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED);
         }
-        if (session.getMode() != WalkMode.DISTANCE) {
+        if (!"distance".equals(session.mode())) {
             throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
         }
     }

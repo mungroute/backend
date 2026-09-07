@@ -32,4 +32,16 @@ class ArchitectureBoundaryTest {
                     "..group.repository..", "..group.service..",
                     "..meet.repository..", "..meet.service..",
                     "..proximity.repository..", "..proximity.service..", "..proximity.store..");
+
+    @ArchTest
+    static final ArchRule WALK_SERVICES_USE_USER_PORTS = noClasses()
+            .that().resideInAPackage("..walk.service..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "..user.repository..", "..user.service..");
+
+    @ArchTest
+    static final ArchRule MEET_AND_PROXIMITY_USE_WALK_SESSION_PORT = noClasses()
+            .that().resideInAnyPackage("..meet.service..", "..proximity.service..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "..walk.domain..", "..walk.repository..", "..walk.service..");
 }

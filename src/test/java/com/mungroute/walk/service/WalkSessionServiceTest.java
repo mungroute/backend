@@ -2,7 +2,6 @@ package com.mungroute.walk.service;
 
 import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
-import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.StartWalkRequest;
@@ -12,7 +11,7 @@ import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
 import com.mungroute.walk.port.WalkPresencePort;
-import com.mungroute.user.service.DogProfileService;
+import com.mungroute.walk.port.WalkUserPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -35,7 +34,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @ExtendWith(MockitoExtension.class)
 class WalkSessionServiceTest {
     @Mock
-    AppUserRepository appUserRepository;
+    WalkUserPort userPort;
 
     @Mock
     WalkSessionRepository walkSessionRepository;
@@ -60,9 +59,6 @@ class WalkSessionServiceTest {
 
     @Mock
     WalkMeetPort meetPort;
-
-    @Mock
-    DogProfileService dogProfileService;
 
     @Mock
     WalkSessionCleanup sessionCleanup;
@@ -166,7 +162,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = org.mockito.Mockito.mock(WalkSession.class);
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
         when(activeSession.isPaused()).thenReturn(true);
@@ -194,7 +190,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = WalkSession.start(user, WalkMode.OFF, OffsetDateTime.now());
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
 
@@ -218,7 +214,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = WalkSession.start(user, WalkMode.DISTANCE, OffsetDateTime.now());
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
 

@@ -10,10 +10,9 @@ import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.proximity.store.PresenceSessionState;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -39,22 +38,22 @@ public class PresenceUpdateService {
     private static final int RESPONSE_LIMIT = 3;
     private static final int CANDIDATE_ACCURACY_BUFFER_METERS = 50;
     private static final Set<String> SAFETY_VISIBLE_MODES = Set.of(
-            WalkMode.OFF.getValue(),
-            WalkMode.DISTANCE.getValue(),
-            WalkMode.MEET.getValue()
+            "off",
+            "distance",
+            "meet"
     );
-    private final WalkSessionRepository walkSessionRepository;
+    private final WalkSessionAccessPort walkSessionPort;
     private final PresenceRepository presenceRepository;
     private final PresenceLocationStore presenceLocationStore;
     private final PresenceMetrics metrics;
 
     public PresenceUpdateService(
-            WalkSessionRepository walkSessionRepository,
+            WalkSessionAccessPort walkSessionPort,
             PresenceRepository presenceRepository,
             PresenceLocationStore presenceLocationStore,
             PresenceMetrics metrics
     ) {
-        this.walkSessionRepository = walkSessionRepository;
+        this.walkSessionPort = walkSessionPort;
         this.presenceRepository = presenceRepository;
         this.presenceLocationStore = presenceLocationStore;
         this.metrics = metrics;
@@ -164,13 +163,13 @@ public class PresenceUpdateService {
             if (state.userId() != userId) {
                 throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
             }
-            if (!WalkMode.DISTANCE.getValue().equals(state.mode())) {
+            if (!"distance".equals(state.mode())) {
                 throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
             }
             return state.mode();
         }
 
-        WalkSession session = walkSessionRepository.findById(request.sessionId())
+        WalkSessionSnapshot session = walkSessionPort.find(request.sessionId())
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateSession(session, userId);
         if (!presenceRepository.hasConsent(request.sessionId())) {
@@ -187,9 +186,9 @@ public class PresenceUpdateService {
             throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
         }
         presenceLocationStore.cacheSession(new PresenceSessionState(
-                request.sessionId(), userId, session.getMode().getValue()
+                request.sessionId(), userId, session.mode()
         ));
-        return session.getMode().getValue();
+        return session.mode();
     }
 
     private ClassifiedPresence classify(
@@ -245,14 +244,14 @@ public class PresenceUpdateService {
         );
     }
 
-    private void validateSession(WalkSession session, long userId) {
-        if (!session.getUser().getUserId().equals(userId)) {
+    private void validateSession(WalkSessionSnapshot session, long userId) {
+        if (session.userId() != userId) {
             throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
         }
-        if (!session.isActive() || session.isPaused()) {
+        if (!session.active() || session.paused()) {
             throw new BusinessException(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED);
         }
-        if (session.getMode() != WalkMode.DISTANCE) {
+        if (!"distance".equals(session.mode())) {
             throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
         }
     }

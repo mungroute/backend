@@ -5,7 +5,8 @@ import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,22 +27,18 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MeetServiceTest {
     @Mock MeetRepository meetRepository;
-    @Mock WalkSessionRepository walkSessionRepository;
+    @Mock WalkSessionAccessPort walkSessionPort;
     @Mock PresenceLocationStore locationStore;
     @Mock SimpMessagingTemplate messagingTemplate;
 
     @Test
     void pendingRequestExposesOnlySafePreview() {
-        MeetService service = new MeetService(meetRepository, walkSessionRepository, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         when(meetRepository.findForSession(10L)).thenReturn(List.of(pending));
-        var session = org.mockito.Mockito.mock(com.mungroute.walk.domain.WalkSession.class);
-        var user = org.mockito.Mockito.mock(com.mungroute.user.domain.AppUser.class);
-        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
-        when(session.getUser()).thenReturn(user);
-        when(user.getUserId()).thenReturn(1L);
-        when(session.isActive()).thenReturn(true);
-        when(session.getMode()).thenReturn(com.mungroute.walk.domain.WalkMode.MEET);
+        when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(10L, 1L, true, false, "meet")
+        ));
         when(meetRepository.findProfile(2L)).thenReturn(Optional.of(profile(2L, "쿠키", "푸들", 2)));
 
         var response = service.list(1L, 10L).getFirst();
@@ -54,7 +51,7 @@ class MeetServiceTest {
 
     @Test
     void onlyRecipientCanAcceptAndProfileAppearsAfterAcceptance() {
-        MeetService service = new MeetService(meetRepository, walkSessionRepository, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         MeetRequestRecord accepted = request("ACCEPTED");
         when(meetRepository.findRequest(pending.requestId())).thenReturn(Optional.of(pending), Optional.of(accepted));
@@ -75,7 +72,7 @@ class MeetServiceTest {
 
     @Test
     void requesterCannotAcceptOwnRequest() {
-        MeetService service = new MeetService(meetRepository, walkSessionRepository, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         when(meetRepository.findRequest(pending.requestId())).thenReturn(Optional.of(pending));
 

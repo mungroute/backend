@@ -10,10 +10,8 @@ import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.proximity.store.PresenceSessionState;
-import com.mungroute.user.domain.AppUser;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -36,14 +34,14 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class MeetPresenceServiceTest {
-    @Mock WalkSessionRepository walkSessionRepository;
+    @Mock WalkSessionAccessPort walkSessionPort;
     @Mock PresenceRepository presenceRepository;
     @Mock PresenceLocationStore locationStore;
     @Mock MeetRepository meetRepository;
 
     @Test
     void returnsOnlySafePreviewFieldsBeforeAcceptance() {
-        MeetPresenceService service = new MeetPresenceService(walkSessionRepository, presenceRepository, locationStore, meetRepository);
+        MeetPresenceService service = new MeetPresenceService(walkSessionPort, presenceRepository, locationStore, meetRepository);
         when(locationStore.findSession(10L)).thenReturn(Optional.of(new PresenceSessionState(10L, 1L, "meet")));
         when(meetRepository.findAcceptedForSession(10L)).thenReturn(Optional.empty());
         when(locationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt())).thenReturn(List.of(
@@ -67,16 +65,11 @@ class MeetPresenceServiceTest {
 
     @Test
     void repopulatesTheSessionCacheAfterAColdDatabaseValidation() {
-        MeetPresenceService service = new MeetPresenceService(walkSessionRepository, presenceRepository, locationStore, meetRepository);
-        AppUser user = org.mockito.Mockito.mock(AppUser.class);
-        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+        MeetPresenceService service = new MeetPresenceService(walkSessionPort, presenceRepository, locationStore, meetRepository);
         when(locationStore.findSession(10L)).thenReturn(Optional.empty());
-        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
-        when(session.getUser()).thenReturn(user);
-        when(user.getUserId()).thenReturn(1L);
-        when(session.isActive()).thenReturn(true);
-        when(session.isPaused()).thenReturn(false);
-        when(session.getMode()).thenReturn(WalkMode.MEET);
+        when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(10L, 1L, true, false, "meet")
+        ));
         when(presenceRepository.hasConsent(10L)).thenReturn(true);
         when(meetRepository.findProfile(1L)).thenReturn(Optional.of(profile(1L, "콩이")));
         when(presenceRepository.updateTelemetry(anyLong(), any(), any(), anyBoolean(), any()))
@@ -92,14 +85,11 @@ class MeetPresenceServiceTest {
     @Test
     void doesNotCacheAnInactiveSessionAfterColdValidation() {
         MeetPresenceService service = new MeetPresenceService(
-                walkSessionRepository, presenceRepository, locationStore, meetRepository);
-        AppUser user = org.mockito.Mockito.mock(AppUser.class);
-        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+                walkSessionPort, presenceRepository, locationStore, meetRepository);
         when(locationStore.findSession(10L)).thenReturn(Optional.empty());
-        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
-        when(session.getUser()).thenReturn(user);
-        when(user.getUserId()).thenReturn(1L);
-        when(session.isActive()).thenReturn(false);
+        when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(10L, 1L, false, false, "meet")
+        ));
 
         assertThatThrownBy(() -> service.update(1L, request(10L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->

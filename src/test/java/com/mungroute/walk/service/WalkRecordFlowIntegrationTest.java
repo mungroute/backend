@@ -71,6 +71,11 @@ class WalkRecordFlowIntegrationTest {
                 Integer.class,
                 sessionId
         )).isEqualTo(240);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM walk_cleanup_outbox WHERE session_id = ?",
+                Integer.class,
+                sessionId
+        )).isEqualTo(1);
     }
 
     @Test
