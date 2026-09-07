@@ -1,13 +1,10 @@
 package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.proximity.repository.PresenceRepository;
-import com.mungroute.proximity.store.PresenceLocation;
-import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.meet.service.MeetService;
 import tools.jackson.databind.ObjectMapper;
 import com.mungroute.course.matching.MapMatchingFailure;
 import com.mungroute.course.matching.MapMatchingResult;
+import com.mungroute.course.matching.MapMatchingStatus;
 import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.repository.AppUserRepository;
@@ -25,6 +22,8 @@ import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.EndWalkSummary;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
+import com.mungroute.walk.port.WalkMeetPort;
+import com.mungroute.walk.port.WalkPresencePort;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -40,10 +39,10 @@ public class WalkSessionService {
     private final SimpleMapMatchingService mapMatchingService;
     private final WalkMatchOutcomeService matchOutcomeService;
     private final ObjectMapper objectMapper;
-    private final PresenceRepository presenceRepository;
-    private final PresenceLocationStore presenceLocationStore;
-    private final MeetService meetService;
+    private final WalkPresencePort presencePort;
+    private final WalkMeetPort meetPort;
     private final DogProfileService dogProfileService;
+    private final WalkSessionCleanup sessionCleanup;
 
     public WalkSessionService(
             AppUserRepository appUserRepository,
@@ -53,10 +52,10 @@ public class WalkSessionService {
             SimpleMapMatchingService mapMatchingService,
             WalkMatchOutcomeService matchOutcomeService,
             ObjectMapper objectMapper,
-            PresenceRepository presenceRepository,
-            PresenceLocationStore presenceLocationStore,
-            MeetService meetService,
-            DogProfileService dogProfileService
+            WalkPresencePort presencePort,
+            WalkMeetPort meetPort,
+            DogProfileService dogProfileService,
+            WalkSessionCleanup sessionCleanup
     ) {
         this.appUserRepository = appUserRepository;
         this.walkSessionRepository = walkSessionRepository;
@@ -65,10 +64,10 @@ public class WalkSessionService {
         this.mapMatchingService = mapMatchingService;
         this.matchOutcomeService = matchOutcomeService;
         this.objectMapper = objectMapper;
-        this.presenceRepository = presenceRepository;
-        this.presenceLocationStore = presenceLocationStore;
-        this.meetService = meetService;
+        this.presencePort = presencePort;
+        this.meetPort = meetPort;
         this.dogProfileService = dogProfileService;
+        this.sessionCleanup = sessionCleanup;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
@@ -171,17 +170,14 @@ public class WalkSessionService {
         // Distance and meet modes keep their existing richer WebSocket updates so
         // this path must not duplicate those Redis writes.
         if (walkSession.getMode() == WalkMode.OFF) {
-            presenceLocationStore.update(new PresenceLocation(
+            presencePort.recordPassiveLocation(
                     walkSession.getSessionId(),
                     userId,
-                    WalkMode.OFF.getValue(),
                     request.lon(),
                     request.lat(),
                     request.accuracy().doubleValue(),
-                    null,
-                    false,
                     receivedAt
-            ));
+            );
         }
     }
 
@@ -226,7 +222,7 @@ public class WalkSessionService {
                 matchResult = mapMatchingService.matchSession(sessionId);
             } catch (RuntimeException exception) {
                 matchResult = new MapMatchingResult(
-                        com.mungroute.walk.domain.WalkMatchStatus.FAILED,
+                        MapMatchingStatus.FAILED,
                         java.util.List.of(),
                         false,
                         0,
@@ -246,9 +242,7 @@ public class WalkSessionService {
                         )
                 );
 
-        presenceRepository.deleteBySessionId(sessionId);
-        presenceLocationStore.delete(sessionId);
-        meetService.closeForSession(userId, sessionId);
+        sessionCleanup.cleanup(userId, sessionId);
 
         return EndWalkResponse.from(summary, objectMapper);
     }
@@ -263,9 +257,8 @@ public class WalkSessionService {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
         }
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
-        presenceRepository.endAllProximityEvents(sessionId, changedAt);
-        presenceLocationStore.delete(sessionId);
-        meetService.closeForSession(userId, sessionId);
+        presencePort.pause(sessionId, changedAt);
+        meetPort.closeForSession(userId, sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
     }
 
@@ -302,13 +295,12 @@ public class WalkSessionService {
         session.changeMode(nextMode);
 
         if (nextMode == WalkMode.OFF) {
-            presenceRepository.deleteBySessionId(sessionId);
-            presenceLocationStore.delete(sessionId);
-            meetService.closeForSession(userId, sessionId);
+            presencePort.remove(sessionId);
+            meetPort.closeForSession(userId, sessionId);
         } else {
             // 동의가 끝난 세션에 대해서만 active_presence 행이 존재한다.
             // 아직 동의하지 않은 경우 0행 갱신은 정상이며, 동의 API가 새 모드로 행을 생성한다.
-            presenceRepository.updateMode(sessionId, nextMode.getValue(), changedAt);
+            presencePort.updateMode(sessionId, nextMode.getValue(), changedAt);
         }
 
         return new ChangeWalkModeResponse(

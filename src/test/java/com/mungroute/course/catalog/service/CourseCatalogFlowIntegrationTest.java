@@ -3,6 +3,7 @@ package com.mungroute.course.catalog.service;
 import com.mungroute.course.catalog.dto.CourseDetailResponse;
 import com.mungroute.course.catalog.diagnostic.service.CourseDiagnosticService;
 import com.mungroute.course.catalog.exception.CourseCatalogErrorCode;
+import com.mungroute.course.catalog.repository.CourseCatalogRepository;
 import com.mungroute.course.draw.dto.ConnectCourseRequest;
 import com.mungroute.course.draw.dto.DrawPointRequest;
 import com.mungroute.course.draw.dto.DrawWaypointRequest;
@@ -40,7 +41,43 @@ class CourseCatalogFlowIntegrationTest {
     CourseDrawService courseDrawService;
 
     @Autowired
+    CourseCatalogRepository courseCatalogRepository;
+
+    @Autowired
     JdbcTemplate jdbcTemplate;
+
+    @Test
+    void assemblesAlternativeSegmentsInWalkingOrderAndRejectsWrongRejoinNode() {
+        ConnectedSegmentPair pair = jdbcTemplate.queryForObject("""
+                SELECT first.segment_id AS first_id,
+                       second.segment_id AS second_id,
+                       first.source AS start_node,
+                       second.target AS end_node
+                FROM route_segment first
+                JOIN route_segment second ON second.source = first.target
+                WHERE first.segment_id <> second.segment_id
+                ORDER BY first.segment_id, second.segment_id
+                LIMIT 1
+                """, (resultSet, rowNumber) -> new ConnectedSegmentPair(
+                resultSet.getLong("first_id"),
+                resultSet.getLong("second_id"),
+                resultSet.getLong("start_node"),
+                resultSet.getLong("end_node")
+        ));
+
+        String route = courseCatalogRepository.routeGeoJson(
+                pair.startNode(),
+                pair.endNode(),
+                List.of(pair.firstSegmentId(), pair.secondSegmentId())
+        );
+
+        assertThat(route).contains("\"type\":\"LineString\"");
+        assertThat(courseCatalogRepository.routeGeoJson(
+                pair.startNode(),
+                pair.startNode(),
+                List.of(pair.firstSegmentId(), pair.secondSegmentId())
+        )).isNull();
+    }
 
     @Test
     void listsDetailsReassignsAndDeletesOwnedCustomCourses() {
@@ -166,6 +203,14 @@ class CourseCatalogFlowIntegrationTest {
             double sourceLon,
             double targetLat,
             double targetLon
+    ) {
+    }
+
+    private record ConnectedSegmentPair(
+            long firstSegmentId,
+            long secondSegmentId,
+            long startNode,
+            long endNode
     ) {
     }
 }

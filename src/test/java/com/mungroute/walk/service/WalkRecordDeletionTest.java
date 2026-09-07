@@ -1,12 +1,13 @@
 package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.group.repository.GroupRepository;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.WalkRecordQueryRepository;
 import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSharingReferencePort;
+import com.mungroute.walk.port.WalkOwnerLockPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -27,7 +28,8 @@ class WalkRecordDeletionTest {
     @Mock WalkSessionRepository walkSessionRepository;
     @Mock WalkRecordQueryRepository queryRepository;
     @Mock ObjectMapper objectMapper;
-    @Mock GroupRepository groupRepository;
+    @Mock WalkSharingReferencePort sharingReferencePort;
+    @Mock WalkOwnerLockPort ownerLockPort;
     @Mock WalkSession session;
     @Mock AppUser owner;
     @InjectMocks WalkRecordService service;
@@ -38,7 +40,7 @@ class WalkRecordDeletionTest {
         when(session.getUser()).thenReturn(owner);
         when(owner.getUserId()).thenReturn(7L);
         when(session.isSaved()).thenReturn(true);
-        when(groupRepository.isCourseShared("walk", 31L)).thenReturn(true);
+        when(sharingReferencePort.isShared(31L)).thenReturn(true);
 
         assertThatThrownBy(() -> service.delete(7L, 31L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->

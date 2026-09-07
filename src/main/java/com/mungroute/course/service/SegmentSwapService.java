@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -27,24 +26,27 @@ import java.util.Set;
 
 @Service
 public class SegmentSwapService {
-    private static final BigDecimal METERS_PER_MINUTE = new BigDecimal("40.0");
-    private static final BigDecimal TARGET_TIME_TOLERANCE = new BigDecimal("0.15");
-
     private final CourseRoutingRepository routingRepository;
     private final CourseMetricsCalculator metricsCalculator;
     private final CourseSectionSplitter sectionSplitter;
     private final CourseRoutingPolicy policy;
+    private final SegmentConnectivityLoader connectivityLoader;
+    private final SegmentSwapEvaluator evaluator;
 
     public SegmentSwapService(
             CourseRoutingRepository routingRepository,
             CourseMetricsCalculator metricsCalculator,
             CourseSectionSplitter sectionSplitter,
-            CourseRoutingPolicy policy
+            CourseRoutingPolicy policy,
+            SegmentConnectivityLoader connectivityLoader,
+            SegmentSwapEvaluator evaluator
     ) {
         this.routingRepository = routingRepository;
         this.metricsCalculator = metricsCalculator;
         this.sectionSplitter = sectionSplitter;
         this.policy = policy;
+        this.connectivityLoader = connectivityLoader;
+        this.evaluator = evaluator;
     }
 
     @Transactional(readOnly = true)
@@ -97,7 +99,7 @@ public class SegmentSwapService {
             throw new IllegalArgumentException("목표 시간과 허용 우회율이 올바르지 않습니다.");
         }
         List<CourseSegmentData> baseSegments = withMeasuredLengths(
-                loadComplete(basePath.segmentIds(), referenceTime),
+                connectivityLoader.loadComplete(basePath.segmentIds(), referenceTime),
                 baseSegmentLengthsM
         );
         CourseMetrics baseMetrics;
@@ -134,7 +136,9 @@ public class SegmentSwapService {
         EvaluatedAlternative best = null;
         boolean rejectedByTime = false;
         for (List<SectionCandidate> combination : combinations) {
-            if (overlaps(combination)) {
+            if (evaluator.overlaps(combination.stream()
+                    .map(SectionCandidate::alternativeSegmentIds)
+                    .toList())) {
                 continue;
             }
             List<Long> alternativeIds = applyReplacements(basePath.segmentIds(), combination);
@@ -149,10 +153,10 @@ public class SegmentSwapService {
             } catch (CourseProcessingException exception) {
                 continue;
             }
-            if (!withinOverallDetour(baseMetrics.lengthM(), alternativeMetrics.lengthM(), overallDetourRatio)) {
+            if (!evaluator.withinOverallDetour(baseMetrics.lengthM(), alternativeMetrics.lengthM(), overallDetourRatio)) {
                 continue;
             }
-            if (!withinTargetTime(alternativeMetrics.lengthM(), targetTimeMin)) {
+            if (!evaluator.withinTargetTime(alternativeMetrics.lengthM(), targetTimeMin)) {
                 rejectedByTime = true;
                 continue;
             }
@@ -216,17 +220,19 @@ public class SegmentSwapService {
             );
             SectionCandidate bestForSection = null;
             for (PathCandidate rawPath : rawPaths) {
-                if (rawPath.segmentIds().isEmpty() || samePath(rawPath.segmentIds(), section.segmentIds())) {
+                if (rawPath.segmentIds().isEmpty()
+                        || evaluator.samePath(rawPath.segmentIds(), section.segmentIds())) {
                     continue;
                 }
                 foundPath = true;
-                List<CourseSegmentData> candidateSegments = loadComplete(rawPath.segmentIds(), referenceTime);
+                List<CourseSegmentData> candidateSegments = connectivityLoader.loadComplete(
+                        rawPath.segmentIds(), referenceTime);
                 CourseMetrics candidateMetrics = calculate(candidateSegments, context);
                 BigDecimal addedLength = candidateMetrics.lengthM().subtract(section.lengthM());
                 BigDecimal sectionDetourLimit = section.lengthM()
                         .multiply(BigDecimal.valueOf(policy.sectionDetourRatio()));
                 if (addedLength.compareTo(sectionDetourLimit) > 0
-                        || intersects(rawPath.segmentIds(), outsideSection)) {
+                        || evaluator.intersects(rawPath.segmentIds(), outsideSection)) {
                     continue;
                 }
                 passedDetour = true;
@@ -313,7 +319,8 @@ public class SegmentSwapService {
                 result.add(baseSegments.get(index));
                 index++;
             } else {
-                result.addAll(loadComplete(replacement.alternativeSegmentIds(), referenceTime));
+                result.addAll(connectivityLoader.loadComplete(
+                        replacement.alternativeSegmentIds(), referenceTime));
                 index = replacement.section().toSegmentIndexExclusive();
             }
         }
@@ -328,20 +335,6 @@ public class SegmentSwapService {
             }
         }
         return result;
-    }
-
-    private List<CourseSegmentData> loadComplete(
-            List<Long> segmentIds,
-            ThermalReferenceTime referenceTime
-    ) {
-        List<CourseSegmentData> segments = routingRepository.findSegmentsInOrder(segmentIds, referenceTime);
-        if (segments.size() != segmentIds.size() || segments.stream().anyMatch(segment -> segment == null)) {
-            throw new CourseProcessingException(
-                    AlternativeReason.COURSE_NOT_CONNECTED,
-                    "코스 링크 일부를 DB에서 찾을 수 없습니다."
-            );
-        }
-        return segments;
     }
 
     private List<CourseSegmentData> withMeasuredLengths(
@@ -366,42 +359,6 @@ public class SegmentSwapService {
         return context == null
                 ? metricsCalculator.calculate(segments)
                 : metricsCalculator.calculate(segments, context);
-    }
-
-    private boolean withinTargetTime(BigDecimal lengthM, int targetTimeMin) {
-        BigDecimal targetLength = METERS_PER_MINUTE.multiply(BigDecimal.valueOf(targetTimeMin));
-        BigDecimal tolerance = targetLength.multiply(TARGET_TIME_TOLERANCE);
-        return lengthM.subtract(targetLength).abs().compareTo(tolerance) <= 0;
-    }
-
-    private boolean withinOverallDetour(BigDecimal baseLength, BigDecimal alternativeLength, double ratio) {
-        BigDecimal maximum = baseLength.multiply(BigDecimal.ONE.add(BigDecimal.valueOf(ratio)));
-        return alternativeLength.compareTo(maximum) <= 0;
-    }
-
-    private boolean overlaps(List<SectionCandidate> candidates) {
-        Set<Long> seen = new HashSet<>();
-        for (SectionCandidate candidate : candidates) {
-            for (Long segmentId : candidate.alternativeSegmentIds()) {
-                if (!seen.add(segmentId)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean samePath(List<Long> left, List<Long> right) {
-        if (left.equals(right)) {
-            return true;
-        }
-        List<Long> reversed = new ArrayList<>(right);
-        java.util.Collections.reverse(reversed);
-        return left.equals(reversed);
-    }
-
-    private boolean intersects(Collection<Long> left, Set<Long> right) {
-        return left.stream().anyMatch(right::contains);
     }
 
     private SegmentSwapResult failure(
@@ -440,6 +397,8 @@ public class SegmentSwapService {
                     section.index(),
                     section.fromSegmentIndex(),
                     section.toSegmentIndexExclusive(),
+                    section.startNode(),
+                    section.endNode(),
                     section.segmentIds(),
                     alternativeSegmentIds,
                     temperatureImprovementC.setScale(2, RoundingMode.HALF_UP),

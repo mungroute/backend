@@ -75,7 +75,10 @@ public class AuthService {
     @Transactional
     public IssuedAuth refresh(String rawRefreshToken) {
         OffsetDateTime now = OffsetDateTime.now();
-        RefreshToken current = refreshTokenRepository.findByTokenHash(tokenHashService.hash(rawRefreshToken))
+        // Serialize rotation attempts for a token. Without the row lock, two
+        // concurrent refresh requests can both observe the token as usable and
+        // mint independent replacement sessions.
+        RefreshToken current = refreshTokenRepository.findByTokenHashForUpdate(tokenHashService.hash(rawRefreshToken))
                 .orElseThrow(() -> new BusinessException(AuthErrorCode.TOKEN_INVALID));
         if (!current.isUsableAt(now)) {
             throw new BusinessException(AuthErrorCode.TOKEN_EXPIRED);
@@ -112,9 +115,10 @@ public class AuthService {
 
     private IssuedAuth issueAuth(AppUser user) {
         String rawRefreshToken = tokenHashService.newOpaqueToken();
-        refreshTokenRepository.save(RefreshToken.issue(user, tokenHashService.hash(rawRefreshToken),
+        String sessionHash = tokenHashService.hash(rawRefreshToken);
+        refreshTokenRepository.save(RefreshToken.issue(user, sessionHash,
                 OffsetDateTime.now().plus(jwtProperties.refreshTokenTtl())));
-        return new IssuedAuth(AuthResponse.of(accessTokenService.issue(user), user), rawRefreshToken);
+        return new IssuedAuth(AuthResponse.of(accessTokenService.issue(user, sessionHash), user), rawRefreshToken);
     }
 
     private void validateUnique(String email, String nickname, String phoneNumber) {

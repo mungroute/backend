@@ -1,0 +1,32 @@
+name: Backend CodeQL
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  schedule:
+    - cron: "17 2 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - run: chmod +x gradlew
+      - name: Compile for analysis
+        run: ./gradlew clean classes --no-daemon
+      - uses: github/codeql-action/analyze@v4

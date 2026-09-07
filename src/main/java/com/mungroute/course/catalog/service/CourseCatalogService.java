@@ -19,7 +19,6 @@ import com.mungroute.course.service.CourseMetricsCalculator;
 import com.mungroute.course.service.CourseProcessingException;
 import com.mungroute.course.service.SegmentSwapService;
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.group.repository.GroupRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -29,8 +28,10 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 public class CourseCatalogService {
@@ -42,7 +43,8 @@ public class CourseCatalogService {
     private final SegmentSwapService segmentSwapService;
     private final SolarPositionService solarPositionService;
     private final ObjectMapper objectMapper;
-    private final GroupRepository groupRepository;
+    private final CourseRepresentativeService representativeService;
+    private final CourseDeletionService deletionService;
 
     public CourseCatalogService(
             CourseCatalogRepository catalogRepository,
@@ -51,7 +53,8 @@ public class CourseCatalogService {
             SegmentSwapService segmentSwapService,
             SolarPositionService solarPositionService,
             ObjectMapper objectMapper,
-            GroupRepository groupRepository
+            CourseRepresentativeService representativeService,
+            CourseDeletionService deletionService
     ) {
         this.catalogRepository = catalogRepository;
         this.routingRepository = routingRepository;
@@ -59,7 +62,8 @@ public class CourseCatalogService {
         this.segmentSwapService = segmentSwapService;
         this.solarPositionService = solarPositionService;
         this.objectMapper = objectMapper;
-        this.groupRepository = groupRepository;
+        this.representativeService = representativeService;
+        this.deletionService = deletionService;
     }
 
     @Transactional(readOnly = true)
@@ -88,32 +92,17 @@ public class CourseCatalogService {
             String sourceValue,
             long courseId,
             boolean representative,
-            Instant requestedAt
+        Instant requestedAt
     ) {
         CourseSource source = parseSource(sourceValue);
-        CourseCatalogRow row = owned(userId, source, courseId);
-        if (representative && source == CourseSource.WALK && (!row.loop() || row.segmentIds().isEmpty())) {
-            throw new BusinessException(CourseCatalogErrorCode.REPRESENTATIVE_COURSE_INELIGIBLE);
-        }
-        if (representative) {
-            catalogRepository.clearRepresentatives(userId);
-        }
-        if (catalogRepository.setRepresentative(userId, source, courseId, representative) != 1) {
-            throw new BusinessException(CourseCatalogErrorCode.COURSE_NOT_FOUND);
-        }
-        return toDetail(owned(userId, source, courseId), requestedAt);
+        return toDetail(representativeService.setRepresentative(
+                userId, source, courseId, representative
+        ), requestedAt);
     }
 
     @Transactional
     public void delete(long userId, String sourceValue, long courseId) {
-        CourseSource source = parseSource(sourceValue);
-        owned(userId, source, courseId);
-        if (groupRepository.isCourseShared(source.name().toLowerCase(Locale.ROOT), courseId)) {
-            throw new BusinessException(CourseCatalogErrorCode.COURSE_SHARED_WITH_GROUP);
-        }
-        if (catalogRepository.deleteOwned(userId, source, courseId) != 1) {
-            throw new BusinessException(CourseCatalogErrorCode.COURSE_NOT_FOUND);
-        }
+        deletionService.delete(userId, parseSource(sourceValue), courseId);
     }
 
     @Transactional(readOnly = true)
@@ -141,6 +130,47 @@ public class CourseCatalogService {
         if (!result.hasAlternative()) {
             return unavailable(row, context, usualMetrics, usualRoute, result.reason().name());
         }
+        PathEndpoints courseEndpoints;
+        try {
+            courseEndpoints = pathEndpoints(row.segmentIds(), context);
+        } catch (CourseProcessingException exception) {
+            return unavailable(row, context, usualMetrics, usualRoute, exception.reason().name());
+        }
+        JsonNode alternativeRoute = parseGeoJson(catalogRepository.routeGeoJson(
+                courseEndpoints.startNode(),
+                courseEndpoints.endNode(),
+                result.alternativePath().segmentIds()
+        ));
+        if (!isContinuousLine(alternativeRoute)) {
+            return unavailable(row, context, usualMetrics, usualRoute, "COURSE_NOT_CONNECTED");
+        }
+        List<SwappedSectionResponse> swappedSections = new ArrayList<>();
+        for (var section : result.swappedSections()) {
+            JsonNode originalSectionRoute = sectionRouteGeoJson(
+                    section.startNode(),
+                    section.endNode(),
+                    section.originalSegmentIds()
+            );
+            JsonNode alternativeSectionRoute = parseGeoJson(catalogRepository.routeGeoJson(
+                    section.startNode(),
+                    section.endNode(),
+                    section.alternativeSegmentIds()
+            ));
+            if (!isContinuousLine(originalSectionRoute) || !isContinuousLine(alternativeSectionRoute)) {
+                return unavailable(row, context, usualMetrics, usualRoute, "COURSE_NOT_CONNECTED");
+            }
+            swappedSections.add(new SwappedSectionResponse(
+                    section.sectionIndex(),
+                    section.fromSegmentIndex(),
+                    section.toSegmentIndexExclusive(),
+                    section.originalSegmentIds(),
+                    section.alternativeSegmentIds(),
+                    originalSectionRoute,
+                    alternativeSectionRoute,
+                    section.temperatureImprovementC(),
+                    section.addedLengthM()
+            ));
+        }
         CourseMetricResponse usual = toMetric(result.base() == null ? usualMetrics : result.base(), context);
         CourseMetricResponse alternative = toMetric(result.alternative(), context);
         return new CourseComparisonResponse(
@@ -151,22 +181,119 @@ public class CourseCatalogService {
                 usual,
                 alternative,
                 usualRoute,
-                parseGeoJson(catalogRepository.routeGeoJson(result.alternativePath().segmentIds())),
+                alternativeRoute,
                 usual.estimatedSurfaceTempC().subtract(alternative.estimatedSurfaceTempC()),
                 alternative.lengthM().subtract(usual.lengthM()),
-                result.swappedSections().stream().map(section -> new SwappedSectionResponse(
-                        section.sectionIndex(),
-                        section.fromSegmentIndex(),
-                        section.toSegmentIndexExclusive(),
-                        section.originalSegmentIds(),
-                        section.alternativeSegmentIds(),
-                        parseGeoJson(catalogRepository.routeGeoJson(section.originalSegmentIds())),
-                        parseGeoJson(catalogRepository.routeGeoJson(section.alternativeSegmentIds())),
-                        section.temperatureImprovementC(),
-                        section.addedLengthM()
-                )).toList(),
+                swappedSections,
                 null
         );
+    }
+
+    private PathEndpoints pathEndpoints(List<Long> segmentIds, CourseCalculationContext context) {
+        List<CourseSegmentData> segments = routingRepository.findSegmentsInOrder(
+                segmentIds,
+                context.referenceTime()
+        );
+        if (segments.size() != segmentIds.size() || segments.isEmpty()
+                || segments.stream().anyMatch(segment -> segment == null)) {
+            throw new CourseProcessingException(
+                    com.mungroute.course.domain.AlternativeReason.COURSE_NOT_CONNECTED,
+                    "코스 시작 노드를 확인할 수 없습니다."
+            );
+        }
+        CourseSegmentData first = segments.getFirst();
+        for (long startNode : List.of(first.source(), first.target())) {
+            Long endNode = pathEnd(segments, 0, startNode, new HashSet<>());
+            if (endNode != null) return new PathEndpoints(startNode, endNode);
+        }
+        throw new CourseProcessingException(
+                com.mungroute.course.domain.AlternativeReason.COURSE_NOT_CONNECTED,
+                "코스 구간이 서로 연결되어 있지 않습니다."
+        );
+    }
+
+    private Long pathEnd(
+            List<CourseSegmentData> segments,
+            int index,
+            long currentNode,
+            Set<PathState> failed
+    ) {
+        if (index == segments.size()) return currentNode;
+        PathState state = new PathState(index, currentNode);
+        if (failed.contains(state)) return null;
+
+        CourseSegmentData segment = segments.get(index);
+        Long nextNode = otherNode(segment, currentNode);
+        if (nextNode == null) {
+            failed.add(state);
+            return null;
+        }
+
+        Long endNode = pathEnd(segments, index + 1, nextNode, failed);
+        if (endNode != null) return endNode;
+
+        // A waypoint can split one route segment into two measured occurrences.
+        // In that representation the duplicate pair describes one traversal, not
+        // an out-and-back. Only use this interpretation when full traversal fails.
+        if (isInternalDuplicatePair(segments, index)) {
+            endNode = pathEnd(segments, index + 2, nextNode, failed);
+            if (endNode != null) return endNode;
+        }
+
+        failed.add(state);
+        return null;
+    }
+
+    private Long otherNode(CourseSegmentData segment, long node) {
+        if (segment.source() == node) return segment.target();
+        if (segment.target() == node) return segment.source();
+        return null;
+    }
+
+    private boolean isInternalDuplicatePair(List<CourseSegmentData> segments, int index) {
+        if (index == 0 || index + 2 >= segments.size()) return false;
+        CourseSegmentData current = segments.get(index);
+        return sameUndirectedSegment(current, segments.get(index + 1))
+                && !sameUndirectedSegment(segments.get(index - 1), current)
+                && !sameUndirectedSegment(current, segments.get(index + 2));
+    }
+
+    private boolean sameUndirectedSegment(CourseSegmentData left, CourseSegmentData right) {
+        return left.segmentId() == right.segmentId()
+                && (left.source() == right.source() && left.target() == right.target()
+                || left.source() == right.target() && left.target() == right.source());
+    }
+
+    private JsonNode sectionRouteGeoJson(long startNode, long endNode, List<Long> segmentIds) {
+        JsonNode route = parseGeoJson(catalogRepository.routeGeoJson(startNode, endNode, segmentIds));
+        if (isContinuousLine(route)) return route;
+
+        List<Long> collapsed = collapseConsecutiveDuplicates(segmentIds);
+        if (collapsed.size() == segmentIds.size()) return route;
+        return parseGeoJson(catalogRepository.routeGeoJson(startNode, endNode, collapsed));
+    }
+
+    private List<Long> collapseConsecutiveDuplicates(List<Long> segmentIds) {
+        List<Long> collapsed = new ArrayList<>(segmentIds.size());
+        for (Long segmentId : segmentIds) {
+            if (collapsed.isEmpty() || !collapsed.getLast().equals(segmentId)) {
+                collapsed.add(segmentId);
+            }
+        }
+        return collapsed;
+    }
+
+    private boolean isContinuousLine(JsonNode route) {
+        return route != null
+                && "LineString".equals(route.path("type").asText())
+                && route.path("coordinates").isArray()
+                && route.path("coordinates").size() >= 2;
+    }
+
+    private record PathEndpoints(long startNode, long endNode) {
+    }
+
+    private record PathState(int segmentIndex, long currentNode) {
     }
 
     private CourseComparisonResponse unavailable(

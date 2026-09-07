@@ -47,6 +47,8 @@ class SegmentSwapServiceTest {
         assertThat(result.swappedSections().getFirst().sectionIndex()).isZero();
         assertThat(result.swappedSections().getFirst().fromSegmentIndex()).isZero();
         assertThat(result.swappedSections().getFirst().toSegmentIndexExclusive()).isEqualTo(2);
+        assertThat(result.swappedSections().getFirst().startNode()).isEqualTo(1L);
+        assertThat(result.swappedSections().getFirst().endNode()).isEqualTo(3L);
         assertThat(result.reason()).isNull();
         assertThat(result.alternative().thermalStatus()).isEqualTo("REFERENCE");
         assertThat(result.alternative().confidence()).isEqualTo("LOW");
@@ -156,7 +158,9 @@ class SegmentSwapServiceTest {
                 repository,
                 new CourseMetricsCalculator(),
                 new CourseSectionSplitter(),
-                new CourseRoutingPolicy(3, 2.0, 0.40, 2)
+                new CourseRoutingPolicy(3, 2.0, 0.40, 2),
+                new SegmentConnectivityLoader(repository),
+                new SegmentSwapEvaluator()
         );
     }
 

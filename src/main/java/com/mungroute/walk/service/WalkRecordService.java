@@ -4,7 +4,6 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.group.repository.GroupRepository;
 import com.mungroute.walk.domain.WalkMatchStatus;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.SaveWalkRequest;
@@ -23,6 +22,8 @@ import com.mungroute.walk.repository.WalkRecordDetailRow;
 import com.mungroute.walk.repository.WalkRecordQueryRepository;
 import com.mungroute.walk.repository.WalkRecordSummaryRow;
 import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSharingReferencePort;
+import com.mungroute.walk.port.WalkOwnerLockPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,22 +43,28 @@ public class WalkRecordService {
     private final WalkSessionRepository walkSessionRepository;
     private final WalkRecordQueryRepository queryRepository;
     private final ObjectMapper objectMapper;
-    private final GroupRepository groupRepository;
+    private final WalkSharingReferencePort sharingReferencePort;
+    private final WalkOwnerLockPort ownerLockPort;
 
     public WalkRecordService(
             WalkSessionRepository walkSessionRepository,
             WalkRecordQueryRepository queryRepository,
             ObjectMapper objectMapper,
-            GroupRepository groupRepository
+            WalkSharingReferencePort sharingReferencePort,
+            WalkOwnerLockPort ownerLockPort
     ) {
         this.walkSessionRepository = walkSessionRepository;
         this.queryRepository = queryRepository;
         this.objectMapper = objectMapper;
-        this.groupRepository = groupRepository;
+        this.sharingReferencePort = sharingReferencePort;
+        this.ownerLockPort = ownerLockPort;
     }
 
     @Transactional
     public WalkRecordDetailResponse save(long userId, long sessionId, SaveWalkRequest request) {
+        if (request.representative()) {
+            lockOwner(userId);
+        }
         WalkSession session = ownedForUpdate(userId, sessionId);
         if (session.isActive()) {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_NOT_ENDED);
@@ -78,6 +85,9 @@ public class WalkRecordService {
             long sessionId,
             boolean representative
     ) {
+        if (representative) {
+            lockOwner(userId);
+        }
         WalkSession session = ownedForUpdate(userId, sessionId);
         if (!session.isSaved()) {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_NOT_SAVED);
@@ -123,7 +133,7 @@ public class WalkRecordService {
         if (!session.isSaved()) {
             throw new BusinessException(WalkErrorCode.WALK_SESSION_NOT_SAVED);
         }
-        if (groupRepository.isCourseShared("walk", sessionId)) {
+        if (sharingReferencePort.isShared(sessionId)) {
             throw new BusinessException(WalkErrorCode.WALK_COURSE_SHARED_WITH_GROUP);
         }
         walkSessionRepository.delete(session);
@@ -195,6 +205,12 @@ public class WalkRecordService {
             throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
         }
         return session;
+    }
+
+    private void lockOwner(long userId) {
+        if (!ownerLockPort.lock(userId)) {
+            throw new BusinessException(WalkErrorCode.USER_NOT_FOUND);
+        }
     }
 
     private void validateRepresentativeEligibility(WalkSession session) {

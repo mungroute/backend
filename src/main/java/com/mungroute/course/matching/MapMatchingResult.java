@@ -1,11 +1,9 @@
 package com.mungroute.course.matching;
 
-import com.mungroute.walk.domain.WalkMatchStatus;
-
 import java.util.List;
 
 public record MapMatchingResult(
-        WalkMatchStatus status,
+        MapMatchingStatus status,
         List<Long> segmentIds,
         boolean loop,
         double unmatchedPointRatio,
@@ -18,6 +16,6 @@ public record MapMatchingResult(
     }
 
     public boolean successful() {
-        return status == WalkMatchStatus.MATCHED || status == WalkMatchStatus.PARTIAL;
+        return status == MapMatchingStatus.MATCHED || status == MapMatchingStatus.PARTIAL;
     }
 }
