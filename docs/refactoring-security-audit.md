@@ -92,6 +92,8 @@ payloads, and existing database data remain compatibility constraints.
 - Course matching no longer depends on walk-domain status types.
 - Walk services reach user persistence through `WalkUserPort`; Meet and Proximity
   authorize sessions through the immutable `WalkSessionSnapshot` port.
+- The cleanup outbox lease is claimed atomically; a real PostgreSQL race test
+  verifies that two workers cannot claim the same session concurrently.
 - Course catalog query/metric mapping and comparison are separate use cases behind
   the existing facade; segment-swap candidate generation has its own collaborator.
 - Static `innerHTML` uses in the frontend contain only code-owned markup; no user
@@ -102,8 +104,8 @@ payloads, and existing database data remain compatibility constraints.
 These items were not classified as critical/high based on the current evidence and
 remain explicit follow-ups:
 
-- Add deployed-environment WebSocket reconnect/worker-count and parallel database
-  race smoke tests; unit/architecture tests cannot fully reproduce them (Medium).
+- Add a deployed-environment WebSocket reconnect/worker-count smoke test; unit
+  tests cannot fully reproduce multi-instance infrastructure behavior (Medium).
 
 ## CI gates
 
