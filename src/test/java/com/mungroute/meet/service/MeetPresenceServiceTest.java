@@ -3,17 +3,11 @@ package com.mungroute.meet.service;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.repository.MeetRepository;
+import com.mungroute.meet.port.MeetPresencePort;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
-import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.exception.PresenceErrorCode;
-import com.mungroute.proximity.store.NearbyPresenceLocation;
-import com.mungroute.proximity.store.PresenceLocation;
-import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.proximity.store.PresenceSessionState;
-import com.mungroute.user.domain.AppUser;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -36,22 +30,22 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class MeetPresenceServiceTest {
-    @Mock WalkSessionRepository walkSessionRepository;
-    @Mock PresenceRepository presenceRepository;
-    @Mock PresenceLocationStore locationStore;
+    @Mock WalkSessionAccessPort walkSessionPort;
+    @Mock MeetPresencePort presencePort;
     @Mock MeetRepository meetRepository;
 
     @Test
     void returnsOnlySafePreviewFieldsBeforeAcceptance() {
-        MeetPresenceService service = new MeetPresenceService(walkSessionRepository, presenceRepository, locationStore, meetRepository);
-        when(locationStore.findSession(10L)).thenReturn(Optional.of(new PresenceSessionState(10L, 1L, "meet")));
+        MeetPresenceService service = new MeetPresenceService(walkSessionPort, presencePort, meetRepository);
+        when(presencePort.findSession(10L)).thenReturn(Optional.of(
+                new MeetPresencePort.SessionState(10L, 1L, "meet")));
         when(meetRepository.findAcceptedForSession(10L)).thenReturn(Optional.empty());
-        when(locationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt())).thenReturn(List.of(
-                new NearbyPresenceLocation(20L, 2L, "meet", 126.9781, 37.5666, 7),
-                new NearbyPresenceLocation(30L, 3L, "distance", 126.9781, 37.5666, 7),
-                new NearbyPresenceLocation(40L, 4L, "off", 126.9781, 37.5666, 7)
+        when(presencePort.findNearby(any(MeetPresencePort.Location.class), anyInt(), anyInt())).thenReturn(List.of(
+                nearby(20L, 2L, "meet"),
+                nearby(30L, 3L, "distance"),
+                nearby(40L, 4L, "off")
         ));
-        when(locationStore.issueMeetCandidateRef(10L, 20L, 2L)).thenReturn("opaque-random-reference");
+        when(presencePort.issueCandidateRef(10L, 20L, 2L)).thenReturn("opaque-random-reference");
         when(meetRepository.findProfile(2L)).thenReturn(Optional.of(profile(2L, "쿠키")));
 
         var response = service.update(1L, request(10L));
@@ -67,47 +61,39 @@ class MeetPresenceServiceTest {
 
     @Test
     void repopulatesTheSessionCacheAfterAColdDatabaseValidation() {
-        MeetPresenceService service = new MeetPresenceService(walkSessionRepository, presenceRepository, locationStore, meetRepository);
-        AppUser user = org.mockito.Mockito.mock(AppUser.class);
-        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
-        when(locationStore.findSession(10L)).thenReturn(Optional.empty());
-        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
-        when(session.getUser()).thenReturn(user);
-        when(user.getUserId()).thenReturn(1L);
-        when(session.isActive()).thenReturn(true);
-        when(session.isPaused()).thenReturn(false);
-        when(session.getMode()).thenReturn(WalkMode.MEET);
-        when(presenceRepository.hasConsent(10L)).thenReturn(true);
+        MeetPresenceService service = new MeetPresenceService(walkSessionPort, presencePort, meetRepository);
+        when(presencePort.findSession(10L)).thenReturn(Optional.empty());
+        when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(10L, 1L, true, false, "meet")
+        ));
+        when(presencePort.hasConsent(10L)).thenReturn(true);
         when(meetRepository.findProfile(1L)).thenReturn(Optional.of(profile(1L, "콩이")));
-        when(presenceRepository.updateTelemetry(anyLong(), any(), any(), anyBoolean(), any()))
+        when(presencePort.updateTelemetry(anyLong(), any(), any(), anyBoolean(), any()))
                 .thenReturn(1);
         when(meetRepository.findAcceptedForSession(10L)).thenReturn(Optional.empty());
-        when(locationStore.findNearby(any(PresenceLocation.class), anyInt(), anyInt())).thenReturn(List.of());
+        when(presencePort.findNearby(any(MeetPresencePort.Location.class), anyInt(), anyInt())).thenReturn(List.of());
 
         service.update(1L, request(10L));
 
-        verify(locationStore).cacheSession(new PresenceSessionState(10L, 1L, "meet"));
+        verify(presencePort).cacheSession(new MeetPresencePort.SessionState(10L, 1L, "meet"));
     }
 
     @Test
     void doesNotCacheAnInactiveSessionAfterColdValidation() {
         MeetPresenceService service = new MeetPresenceService(
-                walkSessionRepository, presenceRepository, locationStore, meetRepository);
-        AppUser user = org.mockito.Mockito.mock(AppUser.class);
-        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
-        when(locationStore.findSession(10L)).thenReturn(Optional.empty());
-        when(walkSessionRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(session));
-        when(session.getUser()).thenReturn(user);
-        when(user.getUserId()).thenReturn(1L);
-        when(session.isActive()).thenReturn(false);
+                walkSessionPort, presencePort, meetRepository);
+        when(presencePort.findSession(10L)).thenReturn(Optional.empty());
+        when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(10L, 1L, false, false, "meet")
+        ));
 
         assertThatThrownBy(() -> service.update(1L, request(10L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED));
 
-        verify(locationStore, never()).cacheSession(any(PresenceSessionState.class));
-        verify(locationStore, never()).update(any(PresenceLocation.class));
+        verify(presencePort, never()).cacheSession(any(MeetPresencePort.SessionState.class));
+        verify(presencePort, never()).update(any(MeetPresencePort.Location.class));
     }
 
     private PresenceUpdateRequest request(long sessionId) {
@@ -118,5 +104,10 @@ class MeetPresenceServiceTest {
     private MeetProfileRecord profile(long userId, String name) {
         return new MeetProfileRecord(userId, name, "푸들", 2, "/cookie.jpg", List.of("차분해요"),
                 "LIKES", "NEUTRAL", "COMFORTABLE", "RARE", "NONE");
+    }
+
+    private MeetPresencePort.NearbyLocation nearby(long sessionId, long userId, String mode) {
+        return new MeetPresencePort.NearbyLocation(
+                sessionId, userId, mode, 126.9781, 37.5666, 7, null, true);
     }
 }

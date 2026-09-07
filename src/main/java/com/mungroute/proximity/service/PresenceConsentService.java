@@ -7,10 +7,9 @@ import com.mungroute.proximity.exception.PresenceErrorCode;
 import com.mungroute.proximity.repository.PresenceRepository;
 import com.mungroute.proximity.store.PresenceLocationStore;
 import com.mungroute.proximity.store.PresenceSessionState;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -18,16 +17,16 @@ import java.time.OffsetDateTime;
 
 @Service
 public class PresenceConsentService {
-    private final WalkSessionRepository walkSessionRepository;
+    private final WalkSessionAccessPort walkSessionPort;
     private final PresenceRepository presenceRepository;
     private final PresenceLocationStore presenceLocationStore;
 
     public PresenceConsentService(
-            WalkSessionRepository walkSessionRepository,
+            WalkSessionAccessPort walkSessionPort,
             PresenceRepository presenceRepository,
             PresenceLocationStore presenceLocationStore
     ) {
-        this.walkSessionRepository = walkSessionRepository;
+        this.walkSessionPort = walkSessionPort;
         this.presenceRepository = presenceRepository;
         this.presenceLocationStore = presenceLocationStore;
     }
@@ -37,8 +36,8 @@ public class PresenceConsentService {
             long userId,
             PresenceConsentRequest request
     ) {
-        WalkSession session = walkSessionRepository
-                .findByIdForUpdate(request.sessionId())
+        WalkSessionSnapshot session = walkSessionPort
+                .findForUpdate(request.sessionId())
                 .orElseThrow(() ->
                         new BusinessException(
                                 WalkErrorCode.WALK_SESSION_NOT_FOUND
@@ -51,9 +50,9 @@ public class PresenceConsentService {
         OffsetDateTime consentedAt = OffsetDateTime.now();
 
         int affectedRows = presenceRepository.upsertConsent(
-                session.getSessionId(),
+                session.sessionId(),
                 userId,
-                session.getMode().getValue(),
+                session.mode(),
                 consentedAt
         );
 
@@ -64,41 +63,41 @@ public class PresenceConsentService {
         }
 
         presenceLocationStore.cacheSession(new PresenceSessionState(
-                session.getSessionId(), userId, session.getMode().getValue()
+                session.sessionId(), userId, session.mode()
         ));
 
         return new PresenceConsentResponse(
-                session.getSessionId(),
-                session.getMode().getValue(),
+                session.sessionId(),
+                session.mode(),
                 consentedAt
         );
 
     }
 
-    private void validateOwner(WalkSession session, long userId) {
-        if (!session.getUser().getUserId().equals(userId)) {
+    private void validateOwner(WalkSessionSnapshot session, long userId) {
+        if (session.userId() != userId) {
             throw new BusinessException(
                     WalkErrorCode.WALK_ACCESS_DENIED
             );
         }
     }
 
-    private void validateSessionState(WalkSession session) {
-        if (!session.isActive()) {
+    private void validateSessionState(WalkSessionSnapshot session) {
+        if (!session.active()) {
             throw new BusinessException(
                     WalkErrorCode.WALK_SESSION_ALREADY_ENDED
             );
         }
 
-        if (session.isPaused()) {
+        if (session.paused()) {
             throw new BusinessException(
                     WalkErrorCode.WALK_SESSION_PAUSED
             );
         }
     }
 
-    private void validateMode(WalkSession session) {
-        if (session.getMode() == WalkMode.OFF) {
+    private void validateMode(WalkSessionSnapshot session) {
+        if ("off".equals(session.mode())) {
             throw new BusinessException(
                     PresenceErrorCode.PRESENCE_MODE_DISABLED
             );

@@ -16,5 +16,5 @@ public interface CourseCatalogRepository {
 
     int deleteOwned(long userId, CourseSource source, long courseId);
 
-    String routeGeoJson(List<Long> segmentIds);
+    String routeGeoJson(long startNode, long endNode, List<Long> segmentIds);
 }

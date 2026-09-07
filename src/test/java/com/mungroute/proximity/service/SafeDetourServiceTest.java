@@ -1,19 +1,16 @@
 package com.mungroute.proximity.service;
 
-import com.mungroute.course.draw.repository.CourseDrawRepository;
-import com.mungroute.course.draw.repository.SnappedWalkablePoint;
 import com.mungroute.proximity.detour.SafeDetourPath;
 import com.mungroute.proximity.detour.SafeDetourRouteRepository;
 import com.mungroute.proximity.dto.request.SafeDetourPointRequest;
 import com.mungroute.proximity.dto.request.SafeDetourRequest;
 import com.mungroute.proximity.dto.response.SafeDetourPointResponse;
+import com.mungroute.proximity.port.SafeDetourSnapPort;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.user.domain.AppUser;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,9 +34,9 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class SafeDetourServiceTest {
-    @Mock WalkSessionRepository walkSessionRepository;
+    @Mock WalkSessionAccessPort walkSessionPort;
     @Mock PresenceLocationStore presenceLocationStore;
-    @Mock CourseDrawRepository courseDrawRepository;
+    @Mock SafeDetourSnapPort snapPort;
     @Mock SafeDetourRouteRepository routeRepository;
 
     SafeDetourService service;
@@ -50,15 +47,10 @@ class SafeDetourServiceTest {
     @BeforeEach
     void setUp() {
         service = new SafeDetourService(
-                walkSessionRepository, presenceLocationStore, courseDrawRepository, routeRepository);
-        AppUser user = mock(AppUser.class);
-        WalkSession session = mock(WalkSession.class);
-        when(user.getUserId()).thenReturn(userId);
-        when(session.getUser()).thenReturn(user);
-        when(session.isActive()).thenReturn(true);
-        when(session.isPaused()).thenReturn(false);
-        when(session.getMode()).thenReturn(WalkMode.DISTANCE);
-        when(walkSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+                walkSessionPort, presenceLocationStore, snapPort, routeRepository);
+        when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(
+                new WalkSessionSnapshot(sessionId, userId, true, false, "distance")
+        ));
         origin = new PresenceLocation(sessionId, userId, "distance",
                 126.9780, 37.5665, 5, 0.0, false, OffsetDateTime.now());
     }
@@ -134,9 +126,11 @@ class SafeDetourServiceTest {
         when(presenceLocationStore.findLocation(20)).thenReturn(Optional.of(candidate));
         when(presenceLocationStore.findNearby(eq(origin), eq(550), eq(6))).thenReturn(List.of(
                 new NearbyPresenceLocation(20, 2, "distance", 126.9782, 37.5669, 7)));
-        when(courseDrawRepository.snapToNearestWalkable(anyDouble(), anyDouble(), anyDouble()))
-                .thenReturn(Optional.of(new SnappedWalkablePoint(100, 1, 37.5665, 126.9780, 2)))
-                .thenReturn(Optional.of(new SnappedWalkablePoint(200, 2, 37.5681, 126.9780, 3)));
+        when(snapPort.snap(anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(Optional.of(new SafeDetourSnapPort.SnappedPoint(
+                        100, 1, 37.5665, 126.9780, 2)))
+                .thenReturn(Optional.of(new SafeDetourSnapPort.SnappedPoint(
+                        200, 2, 37.5681, 126.9780, 3)));
     }
 
     private SafeDetourRequest request(String trend) {

@@ -1,12 +1,12 @@
 package com.mungroute.user.service;
 
-import com.mungroute.auth.repository.RefreshTokenRepository;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.dto.request.UpdateUserProfileRequest;
 import com.mungroute.user.dto.response.UserResponse;
 import com.mungroute.user.exception.UserErrorCode;
 import com.mungroute.user.repository.AppUserRepository;
+import com.mungroute.user.port.UserSessionRevocationPort;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -17,14 +17,20 @@ import java.time.OffsetDateTime;
 @Service
 public class UserProfileService {
     private final AppUserRepository userRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
+    private final UserSessionRevocationPort sessionRevocationPort;
     private final PasswordEncoder passwordEncoder;
 
-    public UserProfileService(AppUserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
+    public UserProfileService(AppUserRepository userRepository, UserSessionRevocationPort sessionRevocationPort,
                               PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
-        this.refreshTokenRepository = refreshTokenRepository;
+        this.sessionRevocationPort = sessionRevocationPort;
         this.passwordEncoder = passwordEncoder;
+    }
+
+    public UserResponse me(long userId) {
+        return userRepository.findById(userId)
+                .map(UserResponse::from)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
     }
 
     @Transactional
@@ -54,7 +60,7 @@ public class UserProfileService {
     public void deactivate(long userId) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
-        refreshTokenRepository.revokeAllActiveByUserId(userId, OffsetDateTime.now());
+        sessionRevocationPort.revokeAllActive(userId, OffsetDateTime.now());
         user.deactivate(passwordEncoder.encode("deleted-" + userId + "-" + System.nanoTime()));
         userRepository.save(user);
     }

@@ -97,22 +97,48 @@ public class JdbcCourseCatalogRepository implements CourseCatalogRepository {
     }
 
     @Override
-    public String routeGeoJson(List<Long> segmentIds) {
+    public String routeGeoJson(long startNode, long endNode, List<Long> segmentIds) {
         if (segmentIds == null || segmentIds.isEmpty()) {
             return null;
         }
         String sql = """
-                WITH ordered AS (
-                    SELECT input.segment_id, input.ordinality
-                    FROM unnest(?) WITH ORDINALITY AS input(segment_id, ordinality)
+                WITH RECURSIVE input AS (
+                    SELECT segment_id, ordinality
+                    FROM unnest(?) WITH ORDINALITY AS value(segment_id, ordinality)
+                ), walk AS (
+                    SELECT input.ordinality,
+                           CASE WHEN segment.source = ? THEN segment.target ELSE segment.source END AS next_node,
+                           CASE WHEN segment.source = ? THEN segment.geom ELSE ST_Reverse(segment.geom) END AS oriented_geom
+                    FROM input
+                    JOIN route_segment segment ON segment.segment_id = input.segment_id
+                    WHERE input.ordinality = 1
+                      AND (segment.source = ? OR segment.target = ?)
+                    UNION ALL
+                    SELECT input.ordinality,
+                           CASE WHEN segment.source = walk.next_node THEN segment.target ELSE segment.source END,
+                           CASE WHEN segment.source = walk.next_node THEN segment.geom ELSE ST_Reverse(segment.geom) END
+                    FROM walk
+                    JOIN input ON input.ordinality = walk.ordinality + 1
+                    JOIN route_segment segment ON segment.segment_id = input.segment_id
+                    WHERE segment.source = walk.next_node OR segment.target = walk.next_node
                 )
-                SELECT ST_AsGeoJSON(ST_Transform(ST_LineMerge(ST_Collect(segment.geom ORDER BY ordered.ordinality)), 4326))
-                FROM ordered
-                JOIN route_segment segment ON segment.segment_id = ordered.segment_id
+                SELECT CASE WHEN COUNT(*) = ?
+                                  AND MAX(next_node) FILTER (WHERE ordinality = ?) = ?
+                            THEN ST_AsGeoJSON(ST_Transform(ST_MakeLine(oriented_geom ORDER BY ordinality), 4326))
+                            ELSE NULL
+                       END
+                FROM walk
                 """;
         return jdbcTemplate.query(connection -> {
             var statement = connection.prepareStatement(sql);
             statement.setArray(1, connection.createArrayOf("bigint", segmentIds.toArray(Long[]::new)));
+            statement.setLong(2, startNode);
+            statement.setLong(3, startNode);
+            statement.setLong(4, startNode);
+            statement.setLong(5, startNode);
+            statement.setInt(6, segmentIds.size());
+            statement.setInt(7, segmentIds.size());
+            statement.setLong(8, endNode);
             return statement;
         }, resultSet -> resultSet.next() ? resultSet.getString(1) : null);
     }

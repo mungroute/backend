@@ -12,12 +12,12 @@ import com.mungroute.course.draw.repository.NetworkWaypoint;
 import com.mungroute.course.draw.repository.SnappedWalkablePoint;
 import com.mungroute.course.draw.repository.TraversedWalkableSegment;
 import com.mungroute.course.repository.CourseRoutingRepository;
+import com.mungroute.course.catalog.port.CourseOwnerLockPort;
 import com.mungroute.course.service.CourseMetricsCalculator;
 import com.mungroute.course.draw.time.CourseCalculationContext;
 import com.mungroute.course.draw.time.SolarState;
 import com.mungroute.course.draw.time.SolarPositionService;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
-import com.mungroute.user.repository.AppUserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -39,7 +39,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 @ExtendWith(MockitoExtension.class)
 class CourseDrawServiceTest {
     @Mock
-    AppUserRepository appUserRepository;
+    CourseOwnerLockPort ownerLockPort;
 
     @Mock
     CourseDrawRepository courseDrawRepository;

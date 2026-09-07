@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
@@ -27,13 +28,18 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 @EnableConfigurationProperties({JwtProperties.class, PasswordResetProperties.class})
 public class SecurityConfig {
+    private final Environment environment;
+
+    public SecurityConfig(Environment environment) {
+        this.environment = environment;
+    }
+
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityProblemWriter problemWriter,
                                             JwtUserAuthenticationConverter jwtAuthenticationConverter) throws Exception {
@@ -135,10 +141,10 @@ public class SecurityConfig {
     }
 
     private SecretKey secretKey(JwtProperties properties) {
-        byte[] secret = properties.secret().getBytes(StandardCharsets.UTF_8);
-        if (secret.length < 32) {
-            throw new IllegalStateException("JWT secret must be at least 32 bytes");
-        }
+        byte[] secret = JwtSecretPolicy.validatedBytes(
+                properties.secret(),
+                environment.matchesProfiles("prod")
+        );
         return new SecretKeySpec(secret, "HmacSHA256");
     }
 }

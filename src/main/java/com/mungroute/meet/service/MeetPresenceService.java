@@ -8,18 +8,14 @@ import com.mungroute.meet.dto.response.MeetProfilePreviewResponse;
 import com.mungroute.meet.dto.response.MeetProfileResponse;
 import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.exception.MeetErrorCode;
+import com.mungroute.meet.port.MeetPresencePort;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
 import com.mungroute.proximity.dto.request.PresenceUpdateRequest;
 import com.mungroute.proximity.exception.PresenceErrorCode;
-import com.mungroute.proximity.repository.PresenceRepository;
-import com.mungroute.proximity.store.PresenceLocation;
-import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.proximity.store.PresenceSessionState;
-import com.mungroute.walk.domain.WalkMode;
-import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
-import com.mungroute.walk.repository.WalkSessionRepository;
+import com.mungroute.walk.port.WalkSessionAccessPort;
+import com.mungroute.walk.port.WalkSessionSnapshot;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -31,16 +27,14 @@ import java.util.List;
 @Service
 public class MeetPresenceService {
     private static final int CANDIDATE_LIMIT = 10;
-    private final WalkSessionRepository walkSessionRepository;
-    private final PresenceRepository presenceRepository;
-    private final PresenceLocationStore locationStore;
+    private final WalkSessionAccessPort walkSessionPort;
+    private final MeetPresencePort presencePort;
     private final MeetRepository meetRepository;
 
-    public MeetPresenceService(WalkSessionRepository walkSessionRepository, PresenceRepository presenceRepository,
-                               PresenceLocationStore locationStore, MeetRepository meetRepository) {
-        this.walkSessionRepository = walkSessionRepository;
-        this.presenceRepository = presenceRepository;
-        this.locationStore = locationStore;
+    public MeetPresenceService(WalkSessionAccessPort walkSessionPort, MeetPresencePort presencePort,
+                               MeetRepository meetRepository) {
+        this.walkSessionPort = walkSessionPort;
+        this.presencePort = presencePort;
         this.meetRepository = meetRepository;
     }
 
@@ -49,20 +43,20 @@ public class MeetPresenceService {
         validateTimestamp(request.measuredAt());
         OffsetDateTime now = OffsetDateTime.now();
         validateSession(userId, request.sessionId(), request, now);
-        PresenceLocation origin = new PresenceLocation(
-                request.sessionId(), userId, WalkMode.MEET.getValue(),
+        MeetPresencePort.Location origin = new MeetPresencePort.Location(
+                request.sessionId(), userId, "meet",
                 request.lon().doubleValue(), request.lat().doubleValue(), request.accuracy().doubleValue(),
                 request.heading() == null ? null : request.heading().doubleValue(), request.stationary(), now
         );
-        locationStore.update(origin);
+        presencePort.update(origin);
 
         var accepted = meetRepository.findAcceptedForSession(request.sessionId());
         MeetConnectionResponse connection = accepted.flatMap(active -> connection(request.sessionId(), userId, active))
                 .orElse(null);
         List<MeetCandidateResponse> candidates = connection == null
-                ? locationStore.findNearby(origin, request.radiusM() + 50, CANDIDATE_LIMIT).stream()
+                ? presencePort.findNearby(origin, request.radiusM() + 50, CANDIDATE_LIMIT).stream()
                     .filter(candidate -> candidate.userId() != userId)
-                    .filter(candidate -> WalkMode.MEET.getValue().equals(candidate.mode()))
+                    .filter(candidate -> "meet".equals(candidate.mode()))
                     .filter(candidate -> !meetRepository.isBlockedEither(userId, candidate.userId()))
                     .map(candidate -> new CandidateWithDistance(candidate,
                             haversine(origin.latitude(), origin.longitude(), candidate.latitude(), candidate.longitude())))
@@ -72,7 +66,7 @@ public class MeetPresenceService {
                     .flatMap(candidate -> meetRepository.findProfile(candidate.location.userId()).stream()
                             .map(profile -> new CandidateWithProfile(candidate, profile)))
                     .map(candidate -> new MeetCandidateResponse(
-                            locationStore.issueMeetCandidateRef(origin.sessionId(), candidate.candidate.location.sessionId(), candidate.candidate.location.userId()),
+                            presencePort.issueCandidateRef(origin.sessionId(), candidate.candidate.location.sessionId(), candidate.candidate.location.userId()),
                             distanceBand(candidate.candidate.distance), now.plusSeconds(30),
                             MeetProfilePreviewResponse.from(candidate.profile)
                     )).toList()
@@ -86,7 +80,7 @@ public class MeetPresenceService {
         long otherSessionId = request.otherSessionId(sessionId);
         long otherUserId = request.otherUserId(userId);
         if (meetRepository.isBlockedEither(userId, otherUserId)) return java.util.Optional.empty();
-        return locationStore.findLocation(otherSessionId).flatMap(location ->
+        return presencePort.findLocation(otherSessionId).flatMap(location ->
                 meetRepository.findProfile(otherUserId).map(profile -> new MeetConnectionResponse(
                         request.requestId(), BigDecimal.valueOf(location.longitude()), BigDecimal.valueOf(location.latitude()),
                         location.updatedAt(), MeetProfileResponse.from(profile)
@@ -94,26 +88,26 @@ public class MeetPresenceService {
     }
 
     private void validateSession(long userId, long sessionId, PresenceUpdateRequest request, OffsetDateTime now) {
-        var cached = locationStore.findSession(sessionId);
+        var cached = presencePort.findSession(sessionId);
         if (cached.isPresent()) {
             if (cached.get().userId() != userId) throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
-            if (!WalkMode.MEET.getValue().equals(cached.get().mode())) throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
+            if (!"meet".equals(cached.get().mode())) throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
             return;
         }
-        WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
+        WalkSessionSnapshot session = walkSessionPort.findForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
-        if (!session.getUser().getUserId().equals(userId)) throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
-        if (!session.isActive() || session.isPaused()) throw new BusinessException(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED);
-        if (session.getMode() != WalkMode.MEET) throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
-        if (!presenceRepository.hasConsent(sessionId)) throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
+        if (session.userId() != userId) throw new BusinessException(WalkErrorCode.WALK_ACCESS_DENIED);
+        if (!session.active() || session.paused()) throw new BusinessException(PresenceErrorCode.PRESENCE_UPDATE_NOT_ALLOWED);
+        if (!"meet".equals(session.mode())) throw new BusinessException(PresenceErrorCode.PRESENCE_MODE_DISABLED);
+        if (!presencePort.hasConsent(sessionId)) throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
         if (meetRepository.findProfile(userId).isEmpty()) throw new BusinessException(MeetErrorCode.PROFILE_REQUIRED);
-        if (presenceRepository.updateTelemetry(sessionId, request.accuracy(), request.heading(), request.stationary(), now) != 1) {
+        if (presencePort.updateTelemetry(sessionId, request.accuracy(), request.heading(), request.stationary(), now) != 1) {
             throw new BusinessException(PresenceErrorCode.LOCATION_CONSENT_REQUIRED);
         }
-        locationStore.cacheSession(new PresenceSessionState(
+        presencePort.cacheSession(new MeetPresencePort.SessionState(
                 sessionId,
                 userId,
-                WalkMode.MEET.getValue()
+                "meet"
         ));
     }
 
@@ -139,6 +133,6 @@ public class MeetPresenceService {
         return "BAND_100_500";
     }
 
-    private record CandidateWithDistance(com.mungroute.proximity.store.NearbyPresenceLocation location, double distance) {}
+    private record CandidateWithDistance(MeetPresencePort.NearbyLocation location, double distance) {}
     private record CandidateWithProfile(CandidateWithDistance candidate, MeetProfileRecord profile) {}
 }

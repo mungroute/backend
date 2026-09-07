@@ -3,7 +3,6 @@ package com.mungroute.course.matching;
 import com.mungroute.course.domain.PathCandidate;
 import com.mungroute.course.repository.CourseRoutingRepository;
 import com.mungroute.course.repository.MatchedTrackPoint;
-import com.mungroute.walk.domain.WalkMatchStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +39,7 @@ public class SimpleMapMatchingService {
         );
         if (samples.size() < 2 || distinctLocationCount(samples) < 2) {
             return failed(
-                    WalkMatchStatus.INSUFFICIENT_POINTS,
+                    MapMatchingStatus.INSUFFICIENT_POINTS,
                     MapMatchingFailure.INSUFFICIENT_POINTS,
                     0,
                     0,
@@ -52,7 +51,7 @@ public class SimpleMapMatchingService {
         double unmatchedRatio = (double) unmatchedCount / samples.size();
         if (unmatchedRatio > MAX_UNMATCHED_RATIO) {
             return failed(
-                    WalkMatchStatus.FAILED,
+                    MapMatchingStatus.FAILED,
                     MapMatchingFailure.TOO_MANY_UNMATCHED_POINTS,
                     unmatchedRatio,
                     0,
@@ -66,7 +65,7 @@ public class SimpleMapMatchingService {
                 .toList());
         if (rawSegments.isEmpty()) {
             return failed(
-                    WalkMatchStatus.INSUFFICIENT_POINTS,
+                    MapMatchingStatus.INSUFFICIENT_POINTS,
                     MapMatchingFailure.INSUFFICIENT_POINTS,
                     unmatchedRatio,
                     0,
@@ -85,7 +84,7 @@ public class SimpleMapMatchingService {
                 double correctionRatio = (double) correctionCount / rawSegments.size();
                 if (correctionRatio > MAX_CORRECTION_RATIO) {
                     return failed(
-                            WalkMatchStatus.FAILED,
+                            MapMatchingStatus.FAILED,
                             MapMatchingFailure.TOO_MANY_GAP_CORRECTIONS,
                             unmatchedRatio,
                             correctionRatio,
@@ -95,7 +94,7 @@ public class SimpleMapMatchingService {
                 Optional<PathCandidate> connector = shortestConnector(previous, current);
                 if (connector.isEmpty()) {
                     return failed(
-                            WalkMatchStatus.FAILED,
+                            MapMatchingStatus.FAILED,
                             MapMatchingFailure.CONNECTOR_NOT_FOUND,
                             unmatchedRatio,
                             correctionRatio,
@@ -113,7 +112,7 @@ public class SimpleMapMatchingService {
         double correctionRatio = (double) correctionCount / rawSegments.size();
         if (elapsedMs > MAX_PROCESSING_TIME_MS) {
             return failed(
-                    WalkMatchStatus.FAILED,
+                    MapMatchingStatus.FAILED,
                     MapMatchingFailure.PROCESSING_TIMEOUT,
                     unmatchedRatio,
                     correctionRatio,
@@ -122,9 +121,9 @@ public class SimpleMapMatchingService {
         }
         boolean loop = distance(samples.getFirst(), samples.getLast()) <= LOOP_RADIUS_M;
         routingRepository.saveMatchedCourse(sessionId, corrected, loop);
-        WalkMatchStatus status = unmatchedCount > 0 || correctionCount > 0
-                ? WalkMatchStatus.PARTIAL
-                : WalkMatchStatus.MATCHED;
+        MapMatchingStatus status = unmatchedCount > 0 || correctionCount > 0
+                ? MapMatchingStatus.PARTIAL
+                : MapMatchingStatus.MATCHED;
         return new MapMatchingResult(
                 status,
                 corrected,
@@ -184,7 +183,7 @@ public class SimpleMapMatchingService {
     }
 
     private MapMatchingResult failed(
-            WalkMatchStatus status,
+            MapMatchingStatus status,
             MapMatchingFailure failure,
             double unmatchedRatio,
             double correctionRatio,

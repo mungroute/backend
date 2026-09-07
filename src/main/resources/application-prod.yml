@@ -22,5 +22,25 @@ spring:
 
 security:
   jwt:
+    # Production must never inherit the well-known local development key.
+    secret: ${JWT_SECRET}
     cookie-secure: ${JWT_COOKIE_SECURE:true}
     cookie-same-site: ${JWT_COOKIE_SAME_SITE:None}
+
+# Production diagnostics are intentionally minimal. Prometheus remains
+# available for the deployment scraper, but health never exposes components
+# and the interactive API documentation is disabled by default.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:false}

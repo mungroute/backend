@@ -7,6 +7,8 @@ public record SwappedSection(
         int sectionIndex,
         int fromSegmentIndex,
         int toSegmentIndexExclusive,
+        long startNode,
+        long endNode,
         List<Long> originalSegmentIds,
         List<Long> alternativeSegmentIds,
         BigDecimal temperatureImprovementC,

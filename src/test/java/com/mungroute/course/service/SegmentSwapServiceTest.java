@@ -47,6 +47,8 @@ class SegmentSwapServiceTest {
         assertThat(result.swappedSections().getFirst().sectionIndex()).isZero();
         assertThat(result.swappedSections().getFirst().fromSegmentIndex()).isZero();
         assertThat(result.swappedSections().getFirst().toSegmentIndexExclusive()).isEqualTo(2);
+        assertThat(result.swappedSections().getFirst().startNode()).isEqualTo(1L);
+        assertThat(result.swappedSections().getFirst().endNode()).isEqualTo(3L);
         assertThat(result.reason()).isNull();
         assertThat(result.alternative().thermalStatus()).isEqualTo("REFERENCE");
         assertThat(result.alternative().confidence()).isEqualTo("LOW");
@@ -152,11 +154,24 @@ class SegmentSwapServiceTest {
     }
 
     private SegmentSwapService service(FakeRoutingRepository repository) {
+        CourseMetricsCalculator metricsCalculator = new CourseMetricsCalculator();
+        CourseRoutingPolicy policy = new CourseRoutingPolicy(3, 2.0, 0.40, 2);
+        SegmentConnectivityLoader connectivityLoader = new SegmentConnectivityLoader(repository);
+        SegmentSwapEvaluator evaluator = new SegmentSwapEvaluator();
         return new SegmentSwapService(
                 repository,
-                new CourseMetricsCalculator(),
+                metricsCalculator,
                 new CourseSectionSplitter(),
-                new CourseRoutingPolicy(3, 2.0, 0.40, 2)
+                policy,
+                connectivityLoader,
+                evaluator,
+                new SegmentSwapCandidateGenerator(
+                        repository,
+                        metricsCalculator,
+                        policy,
+                        connectivityLoader,
+                        evaluator
+                )
         );
     }
 

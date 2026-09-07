@@ -77,6 +77,9 @@ class AuthFlowIntegrationTest {
         Cookie rotatedRefreshCookie = refreshed.getResponse().getCookie("MUNGROUTE_REFRESH");
         assertThat(rotatedRefreshCookie).isNotNull();
 
+        mockMvc.perform(post("/api/auth/refresh").cookie(refreshCookie))
+                .andExpect(status().isUnauthorized());
+
         var resetRequest = mockMvc.perform(post("/api/auth/password-reset/request")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\"}"))

@@ -6,6 +6,7 @@ import com.mungroute.auth.controller.AuthController;
 import com.mungroute.auth.service.AuthService;
 import com.mungroute.auth.service.PasswordResetService;
 import com.mungroute.auth.security.JwtUserAuthenticationConverter;
+import com.mungroute.auth.security.AccessTokenSessionValidator;
 import com.mungroute.auth.security.MungrouteUserDetailsService;
 import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.user.controller.UserController;
@@ -13,6 +14,7 @@ import com.mungroute.place.controller.PlaceController;
 import com.mungroute.place.dto.PlaceSearchResponse;
 import com.mungroute.place.service.PlaceService;
 import com.mungroute.user.dto.response.UserResponse;
+import com.mungroute.user.service.UserProfileService;
 import com.mungroute.walk.controller.WalkSessionController;
 import com.mungroute.walk.service.WalkRecordService;
 import com.mungroute.walk.service.WalkSessionService;
@@ -46,6 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "security.jwt.access-token-ttl=30m",
         "security.jwt.refresh-token-ttl=14d",
         "security.jwt.cookie-secure=false",
+        "security.cors.allowed-origin-patterns=http://localhost:*",
         "security.password-reset.verification-ttl=10m",
         "security.password-reset.reset-token-ttl=10m",
         "security.password-reset.expose-code=false"
@@ -59,6 +62,9 @@ class SecurityAccessTest {
 
     @MockitoBean
     MungrouteUserDetailsService userDetailsService;
+
+    @MockitoBean
+    AccessTokenSessionValidator accessTokenSessionValidator;
 
     @MockitoBean
     WalkSessionService walkSessionService;
@@ -75,6 +81,9 @@ class SecurityAccessTest {
     @MockitoBean
     PlaceService placeService;
 
+    @MockitoBean
+    UserProfileService userProfileService;
+
     @Test
     void anonymousUserCannotAccessWalkApi() throws Exception {
         mockMvc.perform(post("/api/walks/1/end"))
@@ -87,6 +96,14 @@ class SecurityAccessTest {
     void anonymousUserCannotAccessUserOrSessionApi() throws Exception {
         mockMvc.perform(get("/api/users/me")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/auth/session")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void crossOriginRequestCannotUseRefreshCookie() throws Exception {
+        mockMvc.perform(post("/api/auth/refresh")
+                        .header("Origin", "https://evil.example")
+                        .cookie(new jakarta.servlet.http.Cookie("MUNGROUTE_REFRESH", "stolen-cookie")))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -136,10 +153,13 @@ class SecurityAccessTest {
                 List.of(new SimpleGrantedAuthority("ROLE_USER"))
         );
         when(userDetailsService.loadUserById(1L)).thenReturn(principal);
-        when(authService.getUser(1L)).thenReturn(new UserResponse(1L, principal.email(), principal.nickname(), "01012345678"));
+        when(accessTokenSessionValidator.isActive("active-session")).thenReturn(true);
+        when(userProfileService.me(1L)).thenReturn(
+                new UserResponse(1L, principal.email(), principal.nickname(), "01012345678"));
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer("mungroute-test").subject("1").issuedAt(now).expiresAt(now.plusSeconds(600)).build();
+                .issuer("mungroute-test").subject("1").issuedAt(now).expiresAt(now.plusSeconds(600))
+                .claim("sid", "active-session").build();
         String token = jwtEncoder.encode(JwtEncoderParameters.from(
                         JwsHeader.with(MacAlgorithm.HS256).build(), claims))
                 .getTokenValue();
@@ -148,5 +168,20 @@ class SecurityAccessTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(1))
                 .andExpect(jsonPath("$.email").value("mango@example.com"));
+    }
+
+    @Test
+    void revokedRefreshSessionInvalidatesItsAccessToken() throws Exception {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer("mungroute-test").subject("1").issuedAt(now).expiresAt(now.plusSeconds(600))
+                .claim("sid", "revoked-session").build();
+        String token = jwtEncoder.encode(JwtEncoderParameters.from(
+                        JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
+
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
     }
 }

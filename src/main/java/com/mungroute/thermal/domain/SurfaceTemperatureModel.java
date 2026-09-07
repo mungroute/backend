@@ -1,4 +1,4 @@
-package com.mungroute.thermal.service;
+package com.mungroute.thermal.domain;
 
 public final class SurfaceTemperatureModel {
     private static final double STEFAN_BOLTZMANN = 5.670374419e-8;

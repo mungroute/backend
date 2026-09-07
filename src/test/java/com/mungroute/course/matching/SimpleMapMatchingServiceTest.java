@@ -5,7 +5,6 @@ import com.mungroute.course.domain.PathCandidate;
 import com.mungroute.course.repository.CourseRoutingRepository;
 import com.mungroute.course.repository.MatchedTrackPoint;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
-import com.mungroute.walk.domain.WalkMatchStatus;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -28,7 +27,7 @@ class SimpleMapMatchingServiceTest {
 
         MapMatchingResult result = new SimpleMapMatchingService(repository).matchSession(7L);
 
-        assertThat(result.status()).isEqualTo(WalkMatchStatus.MATCHED);
+        assertThat(result.status()).isEqualTo(MapMatchingStatus.MATCHED);
         assertThat(result.segmentIds()).containsExactly(11L, 12L);
         assertThat(result.loop()).isTrue();
         assertThat(repository.savedSegmentIds).containsExactly(11L, 12L);
@@ -44,7 +43,7 @@ class SimpleMapMatchingServiceTest {
 
         MapMatchingResult result = new SimpleMapMatchingService(repository).matchSession(7L);
 
-        assertThat(result.status()).isEqualTo(WalkMatchStatus.MATCHED);
+        assertThat(result.status()).isEqualTo(MapMatchingStatus.MATCHED);
         assertThat(result.failure()).isEqualTo(MapMatchingFailure.NONE);
         assertThat(result.segmentIds()).containsExactly(11L);
         assertThat(repository.savedSegmentIds).containsExactly(11L);
@@ -61,7 +60,7 @@ class SimpleMapMatchingServiceTest {
 
         MapMatchingResult result = new SimpleMapMatchingService(repository).matchSession(7L);
 
-        assertThat(result.status()).isEqualTo(WalkMatchStatus.FAILED);
+        assertThat(result.status()).isEqualTo(MapMatchingStatus.FAILED);
         assertThat(result.failure()).isEqualTo(MapMatchingFailure.TOO_MANY_UNMATCHED_POINTS);
         assertThat(repository.savedSegmentIds).isEmpty();
     }
@@ -75,7 +74,7 @@ class SimpleMapMatchingServiceTest {
 
         MapMatchingResult result = new SimpleMapMatchingService(repository).matchSession(7L);
 
-        assertThat(result.status()).isEqualTo(WalkMatchStatus.FAILED);
+        assertThat(result.status()).isEqualTo(MapMatchingStatus.FAILED);
         assertThat(result.failure()).isEqualTo(MapMatchingFailure.TOO_MANY_GAP_CORRECTIONS);
         assertThat(result.correctionRatio()).isEqualTo(0.5);
     }

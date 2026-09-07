@@ -1,7 +1,6 @@
 package com.mungroute.group.service;
 
 import com.mungroute.course.catalog.dto.CourseDetailResponse;
-import com.mungroute.course.catalog.service.CourseCatalogService;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.group.dto.request.CreateGroupRequest;
 import com.mungroute.group.dto.request.ShareCourseRequest;
@@ -14,6 +13,7 @@ import com.mungroute.group.dto.response.GroupSummaryResponse;
 import com.mungroute.group.dto.response.InviteCodeResponse;
 import com.mungroute.group.dto.response.SavedSharedCourseResponse;
 import com.mungroute.group.exception.GroupErrorCode;
+import com.mungroute.group.port.GroupCourseCatalogPort;
 import com.mungroute.group.repository.GroupActivityRow;
 import com.mungroute.group.repository.GroupInviteRow;
 import com.mungroute.group.repository.GroupRepository;
@@ -39,12 +39,12 @@ public class GroupService {
     private static final int INVITE_RETRIES = 8;
 
     private final GroupRepository groupRepository;
-    private final CourseCatalogService courseCatalogService;
+    private final GroupCourseCatalogPort courseCatalogPort;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public GroupService(GroupRepository groupRepository, CourseCatalogService courseCatalogService) {
+    public GroupService(GroupRepository groupRepository, GroupCourseCatalogPort courseCatalogPort) {
         this.groupRepository = groupRepository;
-        this.courseCatalogService = courseCatalogService;
+        this.courseCatalogPort = courseCatalogPort;
     }
 
     @Transactional(readOnly = true)
@@ -202,7 +202,7 @@ public class GroupService {
     ) {
         memberGroup(userId, groupId);
         String source = normalizeSource(request.courseSource());
-        CourseDetailResponse course = courseCatalogService.detail(userId, source, request.courseId(), requestedAt);
+        CourseDetailResponse course = courseCatalogPort.detail(userId, source, request.courseId(), requestedAt);
         if ("custom".equals(source) && groupRepository.isGroupSavedCourse(request.courseId())) {
             throw new BusinessException(GroupErrorCode.GROUP_SAVED_COURSE_RESHARE_NOT_ALLOWED);
         }
@@ -298,7 +298,7 @@ public class GroupService {
     }
 
     private CourseDetailResponse resolveCourse(SharedCourseRow row, Instant requestedAt) {
-        return courseCatalogService.detail(row.sharedByUserId(), row.courseSource(), row.courseId(), requestedAt);
+        return courseCatalogPort.detail(row.sharedByUserId(), row.courseSource(), row.courseId(), requestedAt);
     }
 
     private GroupActivityResponse activity(GroupActivityRow row) {

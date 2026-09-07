@@ -1,12 +1,12 @@
 package com.mungroute.group.service;
 
 import com.mungroute.course.catalog.dto.CourseDetailResponse;
-import com.mungroute.course.catalog.service.CourseCatalogService;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.group.dto.request.CreateGroupRequest;
 import com.mungroute.group.dto.request.ShareCourseRequest;
 import com.mungroute.group.dto.request.UpdateGroupRequest;
 import com.mungroute.group.exception.GroupErrorCode;
+import com.mungroute.group.port.GroupCourseCatalogPort;
 import com.mungroute.group.repository.GroupInviteRow;
 import com.mungroute.group.repository.GroupRepository;
 import com.mungroute.group.repository.GroupSummaryRow;
@@ -40,7 +40,7 @@ class GroupServiceTest {
     GroupRepository groupRepository;
 
     @Mock
-    CourseCatalogService courseCatalogService;
+    GroupCourseCatalogPort courseCatalogPort;
 
     @InjectMocks
     GroupService groupService;
@@ -131,7 +131,7 @@ class GroupServiceTest {
     @Test
     void sharesOnlyAnOwnedCourseAndAllowsOwnerOrSharerToCancel() {
         when(groupRepository.findForMember(2L, 10L)).thenReturn(Optional.of(group("MEMBER")));
-        when(courseCatalogService.detail(2L, "custom", 7L, NOW)).thenReturn(course(7L));
+        when(courseCatalogPort.detail(2L, "custom", 7L, NOW)).thenReturn(course(7L));
         when(groupRepository.shareCourse(10L, 2L, "custom", 7L)).thenReturn(99L);
         when(groupRepository.findSharedCourse(10L, 99L)).thenReturn(Optional.of(
                 new SharedCourseRow(99L, 10L, 2L, "쿠키 보호자", "custom", 7L, 0, OffsetDateTime.now())
@@ -146,7 +146,7 @@ class GroupServiceTest {
     @Test
     void blocksResharingACourseThatWasSavedFromAGroup() {
         when(groupRepository.findForMember(2L, 10L)).thenReturn(Optional.of(group("MEMBER")));
-        when(courseCatalogService.detail(2L, "custom", 7L, NOW)).thenReturn(course(7L));
+        when(courseCatalogPort.detail(2L, "custom", 7L, NOW)).thenReturn(course(7L));
         when(groupRepository.isGroupSavedCourse(7L)).thenReturn(true);
 
         assertThatThrownBy(() -> groupService.shareCourse(

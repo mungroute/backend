@@ -3,6 +3,7 @@ package com.mungroute.course.catalog.service;
 import com.mungroute.course.catalog.dto.CourseDetailResponse;
 import com.mungroute.course.catalog.diagnostic.service.CourseDiagnosticService;
 import com.mungroute.course.catalog.exception.CourseCatalogErrorCode;
+import com.mungroute.course.catalog.repository.CourseCatalogRepository;
 import com.mungroute.course.draw.dto.ConnectCourseRequest;
 import com.mungroute.course.draw.dto.DrawPointRequest;
 import com.mungroute.course.draw.dto.DrawWaypointRequest;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -26,6 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @Transactional
 @EnabledIfEnvironmentVariable(named = "RUN_DB_INTEGRATION_TESTS", matches = "true")
+@Sql(scripts = "/sql/route-network-fixture.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "/sql/route-network-cleanup.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
 class CourseCatalogFlowIntegrationTest {
     private static final Instant DAY = Instant.parse("2026-08-15T06:00:00Z");
     private static final Instant NIGHT = Instant.parse("2026-08-15T12:00:00Z");
@@ -40,7 +44,43 @@ class CourseCatalogFlowIntegrationTest {
     CourseDrawService courseDrawService;
 
     @Autowired
+    CourseCatalogRepository courseCatalogRepository;
+
+    @Autowired
     JdbcTemplate jdbcTemplate;
+
+    @Test
+    void assemblesAlternativeSegmentsInWalkingOrderAndRejectsWrongRejoinNode() {
+        ConnectedSegmentPair pair = jdbcTemplate.queryForObject("""
+                SELECT first.segment_id AS first_id,
+                       second.segment_id AS second_id,
+                       first.source AS start_node,
+                       second.target AS end_node
+                FROM route_segment first
+                JOIN route_segment second ON second.source = first.target
+                WHERE first.segment_id <> second.segment_id
+                ORDER BY first.segment_id, second.segment_id
+                LIMIT 1
+                """, (resultSet, rowNumber) -> new ConnectedSegmentPair(
+                resultSet.getLong("first_id"),
+                resultSet.getLong("second_id"),
+                resultSet.getLong("start_node"),
+                resultSet.getLong("end_node")
+        ));
+
+        String route = courseCatalogRepository.routeGeoJson(
+                pair.startNode(),
+                pair.endNode(),
+                List.of(pair.firstSegmentId(), pair.secondSegmentId())
+        );
+
+        assertThat(route).contains("\"type\":\"LineString\"");
+        assertThat(courseCatalogRepository.routeGeoJson(
+                pair.startNode(),
+                pair.startNode(),
+                List.of(pair.firstSegmentId(), pair.secondSegmentId())
+        )).isNull();
+    }
 
     @Test
     void listsDetailsReassignsAndDeletesOwnedCustomCourses() {
@@ -166,6 +206,14 @@ class CourseCatalogFlowIntegrationTest {
             double sourceLon,
             double targetLat,
             double targetLon
+    ) {
+    }
+
+    private record ConnectedSegmentPair(
+            long firstSegmentId,
+            long secondSegmentId,
+            long startNode,
+            long endNode
     ) {
     }
 }

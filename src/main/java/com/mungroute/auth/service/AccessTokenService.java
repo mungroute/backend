@@ -21,7 +21,7 @@ public class AccessTokenService {
         this.properties = properties;
     }
 
-    public IssuedAccessToken issue(AppUser user) {
+    public IssuedAccessToken issue(AppUser user, String sessionHash) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(properties.accessTokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
@@ -29,6 +29,7 @@ public class AccessTokenService {
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(user.getUserId().toString())
+                .claim("sid", sessionHash)
                 .claim("email", user.getEmail())
                 .claim("nickname", user.getNickname())
                 .build();

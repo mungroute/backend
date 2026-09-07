@@ -4,12 +4,12 @@ import com.mungroute.auth.config.JwtProperties;
 import com.mungroute.auth.domain.RefreshToken;
 import com.mungroute.auth.dto.*;
 import com.mungroute.auth.exception.AuthErrorCode;
+import com.mungroute.auth.port.AuthUserPort;
 import com.mungroute.auth.repository.RefreshTokenRepository;
 import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.user.dto.response.UserResponse;
-import com.mungroute.user.repository.AppUserRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -23,7 +23,7 @@ import java.util.Locale;
 
 @Service
 public class AuthService {
-    private final AppUserRepository userRepository;
+    private final AuthUserPort userPort;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
@@ -31,11 +31,11 @@ public class AuthService {
     private final TokenHashService tokenHashService;
     private final JwtProperties jwtProperties;
 
-    public AuthService(AppUserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
+    public AuthService(AuthUserPort userPort, RefreshTokenRepository refreshTokenRepository,
                        PasswordEncoder passwordEncoder, AuthenticationManager authenticationManager,
                        AccessTokenService accessTokenService,
                        TokenHashService tokenHashService, JwtProperties jwtProperties) {
-        this.userRepository = userRepository;
+        this.userPort = userPort;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
@@ -51,7 +51,7 @@ public class AuthService {
         validateUnique(email, nickname, request.phoneNumber());
         AppUser user = AppUser.register(email, nickname, passwordEncoder.encode(request.password()), request.phoneNumber());
         try {
-            userRepository.saveAndFlush(user);
+            userPort.saveAndFlush(user);
         } catch (DataIntegrityViolationException exception) {
             throw mapDuplicateConstraint(exception);
         }
@@ -64,7 +64,7 @@ public class AuthService {
             MungrouteUserPrincipal principal = (MungrouteUserPrincipal) authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(normalizeEmail(request.email()), request.password())
             ).getPrincipal();
-            AppUser user = userRepository.findById(principal.userId())
+            AppUser user = userPort.findById(principal.userId())
                     .orElseThrow(() -> new BusinessException(AuthErrorCode.INVALID_CREDENTIALS));
             return issueAuth(user);
         } catch (AuthenticationException exception) {
@@ -75,7 +75,10 @@ public class AuthService {
     @Transactional
     public IssuedAuth refresh(String rawRefreshToken) {
         OffsetDateTime now = OffsetDateTime.now();
-        RefreshToken current = refreshTokenRepository.findByTokenHash(tokenHashService.hash(rawRefreshToken))
+        // Serialize rotation attempts for a token. Without the row lock, two
+        // concurrent refresh requests can both observe the token as usable and
+        // mint independent replacement sessions.
+        RefreshToken current = refreshTokenRepository.findByTokenHashForUpdate(tokenHashService.hash(rawRefreshToken))
                 .orElseThrow(() -> new BusinessException(AuthErrorCode.TOKEN_INVALID));
         if (!current.isUsableAt(now)) {
             throw new BusinessException(AuthErrorCode.TOKEN_EXPIRED);
@@ -93,34 +96,35 @@ public class AuthService {
 
     @Transactional
     public UserResponse getUser(Long userId) {
-        return userRepository.findById(userId).map(UserResponse::from)
+        return userPort.findById(userId).map(UserResponse::from)
                 .orElseThrow(() -> new BusinessException(AuthErrorCode.USER_NOT_FOUND));
     }
 
     public AvailabilityResponse checkEmail(String email) {
-        return new AvailabilityResponse(!userRepository.existsByEmail(normalizeEmail(email)));
+        return new AvailabilityResponse(!userPort.existsByEmail(normalizeEmail(email)));
     }
 
     public AvailabilityResponse checkNickname(String nickname) {
-        return new AvailabilityResponse(!userRepository.existsByNickname(nickname.trim()));
+        return new AvailabilityResponse(!userPort.existsByNickname(nickname.trim()));
     }
 
     public PhoneVerificationResponse verifyPhoneForDemo(String phoneNumber) {
-        boolean available = !userRepository.existsByPhoneNumber(phoneNumber);
+        boolean available = !userPort.existsByPhoneNumber(phoneNumber);
         return new PhoneVerificationResponse(available, available);
     }
 
     private IssuedAuth issueAuth(AppUser user) {
         String rawRefreshToken = tokenHashService.newOpaqueToken();
-        refreshTokenRepository.save(RefreshToken.issue(user, tokenHashService.hash(rawRefreshToken),
+        String sessionHash = tokenHashService.hash(rawRefreshToken);
+        refreshTokenRepository.save(RefreshToken.issue(user, sessionHash,
                 OffsetDateTime.now().plus(jwtProperties.refreshTokenTtl())));
-        return new IssuedAuth(AuthResponse.of(accessTokenService.issue(user), user), rawRefreshToken);
+        return new IssuedAuth(AuthResponse.of(accessTokenService.issue(user, sessionHash), user), rawRefreshToken);
     }
 
     private void validateUnique(String email, String nickname, String phoneNumber) {
-        if (userRepository.existsByEmail(email)) throw new BusinessException(AuthErrorCode.EMAIL_DUPLICATED);
-        if (userRepository.existsByNickname(nickname)) throw new BusinessException(AuthErrorCode.NICKNAME_DUPLICATED);
-        if (userRepository.existsByPhoneNumber(phoneNumber)) throw new BusinessException(AuthErrorCode.PHONE_DUPLICATED);
+        if (userPort.existsByEmail(email)) throw new BusinessException(AuthErrorCode.EMAIL_DUPLICATED);
+        if (userPort.existsByNickname(nickname)) throw new BusinessException(AuthErrorCode.NICKNAME_DUPLICATED);
+        if (userPort.existsByPhoneNumber(phoneNumber)) throw new BusinessException(AuthErrorCode.PHONE_DUPLICATED);
     }
 
     private String normalizeEmail(String email) {

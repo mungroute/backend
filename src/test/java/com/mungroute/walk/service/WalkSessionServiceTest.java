@@ -1,12 +1,6 @@
 package com.mungroute.walk.service;
 
-import com.mungroute.course.matching.SimpleMapMatchingService;
-import com.mungroute.proximity.repository.PresenceRepository;
-import com.mungroute.proximity.store.PresenceLocation;
-import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.meet.service.MeetService;
 import com.mungroute.user.domain.AppUser;
-import com.mungroute.user.repository.AppUserRepository;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.StartWalkRequest;
@@ -14,10 +8,16 @@ import com.mungroute.walk.dto.request.AddWalkPointRequest;
 import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
+import com.mungroute.walk.port.WalkMeetPort;
+import com.mungroute.walk.port.WalkMapMatchingPort;
+import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkPresenceUnavailableException;
+import com.mungroute.walk.port.WalkUserPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 
@@ -28,7 +28,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,7 +36,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @ExtendWith(MockitoExtension.class)
 class WalkSessionServiceTest {
     @Mock
-    AppUserRepository appUserRepository;
+    WalkUserPort userPort;
 
     @Mock
     WalkSessionRepository walkSessionRepository;
@@ -49,7 +48,7 @@ class WalkSessionServiceTest {
     WalkFinalizationService walkFinalizationService;
 
     @Mock
-    SimpleMapMatchingService mapMatchingService;
+    WalkMapMatchingPort mapMatchingPort;
 
     @Mock
     WalkMatchOutcomeService matchOutcomeService;
@@ -58,13 +57,16 @@ class WalkSessionServiceTest {
     ObjectMapper objectMapper;
 
     @Mock
-    PresenceRepository presenceRepository;
+    WalkPresencePort presencePort;
 
     @Mock
-    PresenceLocationStore presenceLocationStore;
+    WalkMeetPort meetPort;
 
     @Mock
-    MeetService meetService;
+    WalkSessionCleanup sessionCleanup;
+
+    @Spy
+    WalkSessionStateMachine stateMachine = new WalkSessionStateMachine();
 
     @InjectMocks
     WalkSessionService walkSessionService;
@@ -105,7 +107,6 @@ class WalkSessionServiceTest {
         when(user.getUserId()).thenReturn(userId);
         when(session.getSessionId()).thenReturn(sessionId);
         when(session.getStartedAt()).thenReturn(startedAt);
-        when(session.isActive()).thenReturn(true);
         when(session.isPaused()).thenReturn(false);
         when(session.getMode()).thenReturn(WalkMode.OFF);
 
@@ -118,16 +119,14 @@ class WalkSessionServiceTest {
 
         verify(walkTrackPointRepository).insertPoint(
                 sessionId, recordedAt, 126.9780, 37.5665, new BigDecimal("7.0"));
-        verify(presenceLocationStore).update(argThat((PresenceLocation location) ->
-                location.sessionId() == sessionId
-                        && location.userId() == userId
-                        && location.mode().equals("off")
-                        && location.longitude() == 126.9780
-                        && location.latitude() == 37.5665
-                        && location.accuracyMeters() == 7.0
-                        && location.headingDegrees() == null
-                        && !location.stationary()
-        ));
+        verify(presencePort).recordPassiveLocation(
+                org.mockito.ArgumentMatchers.eq(sessionId),
+                org.mockito.ArgumentMatchers.eq(userId),
+                org.mockito.ArgumentMatchers.eq(126.9780),
+                org.mockito.ArgumentMatchers.eq(37.5665),
+                org.mockito.ArgumentMatchers.eq(7.0),
+                any(OffsetDateTime.class)
+        );
     }
 
     @Test
@@ -142,7 +141,6 @@ class WalkSessionServiceTest {
         when(user.getUserId()).thenReturn(userId);
         when(session.getSessionId()).thenReturn(sessionId);
         when(session.getStartedAt()).thenReturn(recordedAt.minusMinutes(1));
-        when(session.isActive()).thenReturn(true);
         when(session.isPaused()).thenReturn(false);
         when(session.getMode()).thenReturn(WalkMode.DISTANCE);
 
@@ -151,7 +149,7 @@ class WalkSessionServiceTest {
 
         verify(walkTrackPointRepository).insertPoint(
                 sessionId, recordedAt, 126.9780, 37.5665, new BigDecimal("7.0"));
-        verifyNoInteractions(presenceLocationStore);
+        verifyNoInteractions(presencePort);
     }
 
     @Test
@@ -167,7 +165,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = org.mockito.Mockito.mock(WalkSession.class);
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
         when(activeSession.isPaused()).thenReturn(true);
@@ -195,7 +193,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = WalkSession.start(user, WalkMode.OFF, OffsetDateTime.now());
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
 
@@ -219,7 +217,7 @@ class WalkSessionServiceTest {
         );
         WalkSession activeSession = WalkSession.start(user, WalkMode.DISTANCE, OffsetDateTime.now());
 
-        when(appUserRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
+        when(userPort.findByIdForUpdate(userId)).thenReturn(Optional.of(user));
         when(walkSessionRepository.findActiveByUserIdForUpdate(userId))
                 .thenReturn(Optional.of(activeSession));
 
@@ -242,7 +240,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.MEET);
 
         var response = walkSessionService.changeMode(
@@ -255,12 +252,11 @@ class WalkSessionServiceTest {
         assertThat(response.mode()).isEqualTo("meet");
         assertThat(response.lockedMode()).isEqualTo("meet");
         verify(session).changeMode(WalkMode.MEET);
-        verify(presenceRepository).updateMode(
+        verify(presencePort).updateMode(
                 org.mockito.ArgumentMatchers.eq(sessionId),
                 org.mockito.ArgumentMatchers.eq("meet"),
                 any(OffsetDateTime.class)
         );
-        verifyNoInteractions(presenceLocationStore);
     }
 
     @Test
@@ -273,7 +269,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
 
         var response = walkSessionService.changeMode(
@@ -284,8 +279,7 @@ class WalkSessionServiceTest {
 
         assertThat(response.mode()).isEqualTo("off");
         verify(session).changeMode(WalkMode.OFF);
-        verify(presenceRepository).deleteBySessionId(sessionId);
-        verify(presenceLocationStore).delete(sessionId);
+        verify(presencePort).remove(sessionId);
     }
 
     @Test
@@ -298,7 +292,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
 
         var response = walkSessionService.pauseWalk(userId, sessionId);
 
@@ -308,12 +301,67 @@ class WalkSessionServiceTest {
                 org.mockito.ArgumentMatchers.eq(sessionId),
                 any(OffsetDateTime.class)
         );
-        verify(presenceRepository).endAllProximityEvents(
+        verify(presencePort).pause(
                 org.mockito.ArgumentMatchers.eq(sessionId),
                 any(OffsetDateTime.class)
         );
-        verify(presenceLocationStore).delete(sessionId);
-        verify(meetService).closeForSession(userId, sessionId);
+        verify(meetPort).closeForSession(userId, sessionId);
+    }
+
+    @Test
+    void pauseCommitsDurableStateWhenRealtimePresenceStoreIsUnavailable() {
+        long userId = 1L;
+        long sessionId = 27L;
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(userId);
+        org.mockito.Mockito.doThrow(new WalkPresenceUnavailableException(
+                        "Realtime presence store is unavailable",
+                        new RuntimeException("offline")
+                ))
+                .when(presencePort)
+                .pause(org.mockito.ArgumentMatchers.eq(sessionId), any(OffsetDateTime.class));
+
+        var response = walkSessionService.pauseWalk(userId, sessionId);
+
+        assertThat(response.status()).isEqualTo("PAUSED");
+        verify(walkSessionRepository).pauseWalkSession(
+                org.mockito.ArgumentMatchers.eq(sessionId),
+                any(OffsetDateTime.class)
+        );
+        verify(meetPort).closeForSession(userId, sessionId);
+    }
+
+    @Test
+    void changeModeToOffCommitsWhenRealtimePresenceStoreIsUnavailable() {
+        long userId = 1L;
+        long sessionId = 27L;
+        AppUser user = org.mockito.Mockito.mock(AppUser.class);
+        WalkSession session = org.mockito.Mockito.mock(WalkSession.class);
+
+        when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+        when(session.getUser()).thenReturn(user);
+        when(user.getUserId()).thenReturn(userId);
+        when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
+        org.mockito.Mockito.doThrow(new WalkPresenceUnavailableException(
+                        "Realtime presence store is unavailable",
+                        new RuntimeException("offline")
+                ))
+                .when(presencePort)
+                .remove(sessionId);
+
+        var response = walkSessionService.changeMode(
+                userId,
+                sessionId,
+                new ChangeWalkModeRequest("off")
+        );
+
+        assertThat(response.mode()).isEqualTo("off");
+        verify(session).changeMode(WalkMode.OFF);
+        verify(meetPort).closeForSession(userId, sessionId);
     }
 
     @Test
@@ -326,7 +374,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
 
         assertThatThrownBy(() -> walkSessionService.changeMode(
@@ -336,6 +383,6 @@ class WalkSessionServiceTest {
         )).isInstanceOf(com.mungroute.global.exception.BusinessException.class);
 
         verify(session, never()).changeMode(any(WalkMode.class));
-        verifyNoInteractions(presenceRepository, presenceLocationStore);
+        verifyNoInteractions(presencePort);
     }
 }

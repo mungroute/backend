@@ -1,18 +1,14 @@
 package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.proximity.repository.PresenceRepository;
-import com.mungroute.proximity.store.PresenceLocation;
-import com.mungroute.proximity.store.PresenceLocationStore;
-import com.mungroute.meet.service.MeetService;
 import tools.jackson.databind.ObjectMapper;
 import com.mungroute.course.matching.MapMatchingFailure;
 import com.mungroute.course.matching.MapMatchingResult;
-import com.mungroute.course.matching.SimpleMapMatchingService;
+import com.mungroute.course.matching.MapMatchingStatus;
 import com.mungroute.user.domain.AppUser;
-import com.mungroute.user.repository.AppUserRepository;
-import com.mungroute.user.service.DogProfileService;
 import com.mungroute.walk.domain.WalkMode;
+import com.mungroute.walk.domain.WalkLifecycleEvent;
+import com.mungroute.walk.domain.WalkLifecycleState;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
 import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
@@ -25,7 +21,14 @@ import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.EndWalkSummary;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
+import com.mungroute.walk.port.WalkMeetPort;
+import com.mungroute.walk.port.WalkMapMatchingPort;
+import com.mungroute.walk.port.WalkPresencePort;
+import com.mungroute.walk.port.WalkPresenceUnavailableException;
+import com.mungroute.walk.port.WalkUserPort;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -33,48 +36,49 @@ import java.time.Duration;
 
 @Service
 public class WalkSessionService {
-    private final AppUserRepository appUserRepository;
+    private static final Logger log = LoggerFactory.getLogger(WalkSessionService.class);
+    private final WalkUserPort userPort;
     private final WalkSessionRepository walkSessionRepository;
     private final WalkTrackPointRepository walkTrackPointRepository;
     private final WalkFinalizationService walkFinalizationService;
-    private final SimpleMapMatchingService mapMatchingService;
+    private final WalkMapMatchingPort mapMatchingPort;
     private final WalkMatchOutcomeService matchOutcomeService;
     private final ObjectMapper objectMapper;
-    private final PresenceRepository presenceRepository;
-    private final PresenceLocationStore presenceLocationStore;
-    private final MeetService meetService;
-    private final DogProfileService dogProfileService;
+    private final WalkPresencePort presencePort;
+    private final WalkMeetPort meetPort;
+    private final WalkSessionCleanup sessionCleanup;
+    private final WalkSessionStateMachine stateMachine;
 
     public WalkSessionService(
-            AppUserRepository appUserRepository,
+            WalkUserPort userPort,
             WalkSessionRepository walkSessionRepository,
             WalkTrackPointRepository walkTrackPointRepository,
             WalkFinalizationService walkFinalizationService,
-            SimpleMapMatchingService mapMatchingService,
+            WalkMapMatchingPort mapMatchingPort,
             WalkMatchOutcomeService matchOutcomeService,
             ObjectMapper objectMapper,
-            PresenceRepository presenceRepository,
-            PresenceLocationStore presenceLocationStore,
-            MeetService meetService,
-            DogProfileService dogProfileService
+            WalkPresencePort presencePort,
+            WalkMeetPort meetPort,
+            WalkSessionCleanup sessionCleanup,
+            WalkSessionStateMachine stateMachine
     ) {
-        this.appUserRepository = appUserRepository;
+        this.userPort = userPort;
         this.walkSessionRepository = walkSessionRepository;
         this.walkTrackPointRepository = walkTrackPointRepository;
         this.walkFinalizationService = walkFinalizationService;
-        this.mapMatchingService = mapMatchingService;
+        this.mapMatchingPort = mapMatchingPort;
         this.matchOutcomeService = matchOutcomeService;
         this.objectMapper = objectMapper;
-        this.presenceRepository = presenceRepository;
-        this.presenceLocationStore = presenceLocationStore;
-        this.meetService = meetService;
-        this.dogProfileService = dogProfileService;
+        this.presencePort = presencePort;
+        this.meetPort = meetPort;
+        this.sessionCleanup = sessionCleanup;
+        this.stateMachine = stateMachine;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
     @Transactional
     public StartWalkResponse startWalk(Long userId, StartWalkRequest request) {
-        AppUser user = appUserRepository
+        AppUser user = userPort
                 .findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(
@@ -89,6 +93,7 @@ public class WalkSessionService {
         var activeSession = walkSessionRepository.findActiveByUserIdForUpdate(userId);
         if (activeSession.isPresent()) {
             WalkSession session = activeSession.get();
+            stateMachine.transition(session, WalkLifecycleEvent.RESTORE);
             // A client may have lost its local session snapshot after an auth or
             // page reload. In that case the server's active session is
             // authoritative: recover it instead of rejecting a newly selected,
@@ -101,11 +106,12 @@ public class WalkSessionService {
                 walkSessionRepository.resumeWalkSession(session.getSessionId(), OffsetDateTime.now());
             }
             if (!request.dogIds().isEmpty()) {
-                dogProfileService.attachToWalk(userId, session.getSessionId(), request.dogIds());
+                userPort.attachDogs(userId, session.getSessionId(), request.dogIds());
             }
             return StartWalkResponse.from(session);
         }
 
+        stateMachine.transition(WalkLifecycleState.NOT_STARTED, WalkLifecycleEvent.START);
         WalkSession walkSession = WalkSession.start(
                 user,
                 requestedMode,
@@ -116,7 +122,7 @@ public class WalkSessionService {
         WalkSession savedSession = walkSessionRepository.save(walkSession);
 
         if (!request.dogIds().isEmpty()) {
-            dogProfileService.attachToWalk(userId, savedSession.getSessionId(), request.dogIds());
+            userPort.attachDogs(userId, savedSession.getSessionId(), request.dogIds());
         }
 
         return StartWalkResponse.from(savedSession);
@@ -141,15 +147,7 @@ public class WalkSessionService {
 
         validateOwner(walkSession, userId);
 
-        if (!walkSession.isActive()) {
-            throw new BusinessException(
-                    WalkErrorCode.WALK_SESSION_ALREADY_ENDED
-            );
-        }
-
-        if (walkSession.isPaused()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_PAUSED);
-        }
+        stateMachine.transition(walkSession, WalkLifecycleEvent.ADD_POINT);
 
         validateRecordedAt(
                 walkSession,
@@ -171,17 +169,14 @@ public class WalkSessionService {
         // Distance and meet modes keep their existing richer WebSocket updates so
         // this path must not duplicate those Redis writes.
         if (walkSession.getMode() == WalkMode.OFF) {
-            presenceLocationStore.update(new PresenceLocation(
+            presencePort.recordPassiveLocation(
                     walkSession.getSessionId(),
                     userId,
-                    WalkMode.OFF.getValue(),
                     request.lon(),
                     request.lat(),
                     request.accuracy().doubleValue(),
-                    null,
-                    false,
                     receivedAt
-            ));
+            );
         }
     }
 
@@ -199,9 +194,7 @@ public class WalkSessionService {
         if (session.getPausedAt() != null) {
             elapsedSeconds -= Math.max(0, Duration.between(session.getPausedAt(), measuredUntil).toSeconds());
         }
-        String status = session.getEndedAt() != null
-                ? "ENDED"
-                : session.isPaused() ? "PAUSED" : "ACTIVE";
+        String status = stateMachine.stateOf(session).apiValue();
         return new ActiveWalkStateResponse(
                 sessionId,
                 status,
@@ -223,10 +216,10 @@ public class WalkSessionService {
         if (finalization.matchingRequired()) {
             MapMatchingResult matchResult;
             try {
-                matchResult = mapMatchingService.matchSession(sessionId);
+                matchResult = mapMatchingPort.matchSession(sessionId);
             } catch (RuntimeException exception) {
                 matchResult = new MapMatchingResult(
-                        com.mungroute.walk.domain.WalkMatchStatus.FAILED,
+                        MapMatchingStatus.FAILED,
                         java.util.List.of(),
                         false,
                         0,
@@ -246,9 +239,10 @@ public class WalkSessionService {
                         )
                 );
 
-        presenceRepository.deleteBySessionId(sessionId);
-        presenceLocationStore.delete(sessionId);
-        meetService.closeForSession(userId, sessionId);
+        // Cleanup is attempted immediately for the common path. A durable outbox
+        // owns retries, so a transient Redis/Meet outage cannot turn a committed
+        // walk end into a client-visible failure.
+        sessionCleanup.cleanupNow(sessionId);
 
         return EndWalkResponse.from(summary, objectMapper);
     }
@@ -259,13 +253,16 @@ public class WalkSessionService {
         WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.PAUSE);
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
-        presenceRepository.endAllProximityEvents(sessionId, changedAt);
-        presenceLocationStore.delete(sessionId);
-        meetService.closeForSession(userId, sessionId);
+        try {
+            presencePort.pause(sessionId, changedAt);
+        } catch (WalkPresenceUnavailableException exception) {
+            // Presence keys expire after 30 seconds. The durable PAUSED state is
+            // authoritative and must not be rolled back by a temporary Redis outage.
+            log.warn("Realtime presence cleanup deferred by cache outage for walk session {}", sessionId);
+        }
+        meetPort.closeForSession(userId, sessionId);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "PAUSED", changedAt);
     }
 
@@ -275,9 +272,7 @@ public class WalkSessionService {
         WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.RESUME);
         walkSessionRepository.resumeWalkSession(sessionId, changedAt);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "ACTIVE", changedAt);
     }
@@ -293,22 +288,25 @@ public class WalkSessionService {
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
 
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.CHANGE_MODE);
 
         WalkMode nextMode = WalkMode.from(request.mode());
         validateModeTransition(session, nextMode);
         session.changeMode(nextMode);
 
         if (nextMode == WalkMode.OFF) {
-            presenceRepository.deleteBySessionId(sessionId);
-            presenceLocationStore.delete(sessionId);
-            meetService.closeForSession(userId, sessionId);
+            try {
+                presencePort.remove(sessionId);
+            } catch (WalkPresenceUnavailableException exception) {
+                // The database record was removed first and the remaining cache
+                // entry has a bounded TTL, so the durable mode change can commit.
+                log.warn("Realtime presence cleanup deferred by cache outage for walk session {}", sessionId);
+            }
+            meetPort.closeForSession(userId, sessionId);
         } else {
             // 동의가 끝난 세션에 대해서만 active_presence 행이 존재한다.
             // 아직 동의하지 않은 경우 0행 갱신은 정상이며, 동의 API가 새 모드로 행을 생성한다.
-            presenceRepository.updateMode(sessionId, nextMode.getValue(), changedAt);
+            presencePort.updateMode(sessionId, nextMode.getValue(), changedAt);
         }
 
         return new ChangeWalkModeResponse(
