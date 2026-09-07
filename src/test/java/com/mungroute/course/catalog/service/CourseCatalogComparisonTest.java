@@ -5,6 +5,7 @@ import com.mungroute.course.catalog.repository.CourseCatalogRow;
 import com.mungroute.course.domain.CourseMetrics;
 import com.mungroute.course.domain.CoursePath;
 import com.mungroute.course.domain.CourseSegmentData;
+import com.mungroute.course.domain.CourseSource;
 import com.mungroute.course.domain.SegmentSwapResult;
 import com.mungroute.course.domain.SwappedSection;
 import com.mungroute.course.draw.time.CourseCalculationContext;
@@ -45,25 +46,26 @@ class CourseCatalogComparisonTest {
     @Mock CourseMetricsCalculator metricsCalculator;
     @Mock SegmentSwapService segmentSwapService;
     @Mock SolarPositionService solarPositionService;
-    @Mock CourseRepresentativeService representativeService;
-    @Mock CourseDeletionService deletionService;
 
-    private CourseCatalogService service;
+    private CourseComparisonService service;
     private CourseCalculationContext context;
     private CourseMetrics usualMetrics;
     private CourseMetrics alternativeMetrics;
 
     @BeforeEach
     void setUp() {
-        service = new CourseCatalogService(
-                catalogRepository,
+        CourseCatalogMetricsAssembler assembler = new CourseCatalogMetricsAssembler(
                 routingRepository,
                 metricsCalculator,
-                segmentSwapService,
                 solarPositionService,
-                new ObjectMapper(),
-                representativeService,
-                deletionService
+                new ObjectMapper()
+        );
+        service = new CourseComparisonService(
+                catalogRepository,
+                routingRepository,
+                segmentSwapService,
+                assembler,
+                new CourseCatalogQueryService(catalogRepository, assembler)
         );
         context = new CourseCalculationContext(
                 REQUESTED_AT, ThermalReferenceTime.H15, SolarState.DAYLIGHT, 45.0
@@ -104,7 +106,7 @@ class CourseCatalogComparisonTest {
         when(catalogRepository.routeGeoJson(2, 3, List.of(20L))).thenReturn(LINE);
         when(catalogRepository.routeGeoJson(2, 3, List.of(201L, 202L))).thenReturn(LINE);
 
-        var response = service.comparison(7, "custom", 42, REQUESTED_AT);
+        var response = service.comparison(7, CourseSource.CUSTOM, 42, REQUESTED_AT);
 
         assertThat(response.hasAlternative()).isTrue();
         assertThat(response.unavailableReason()).isNull();
@@ -131,7 +133,7 @@ class CourseCatalogComparisonTest {
                 new CoursePath(alternativeIds), alternativeMetrics, List.of(), null
         ));
 
-        var response = service.comparison(7, "custom", 42, REQUESTED_AT);
+        var response = service.comparison(7, CourseSource.CUSTOM, 42, REQUESTED_AT);
 
         assertThat(response.hasAlternative()).isFalse();
         assertThat(response.unavailableReason()).isEqualTo("COURSE_NOT_CONNECTED");

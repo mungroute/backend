@@ -154,13 +154,24 @@ class SegmentSwapServiceTest {
     }
 
     private SegmentSwapService service(FakeRoutingRepository repository) {
+        CourseMetricsCalculator metricsCalculator = new CourseMetricsCalculator();
+        CourseRoutingPolicy policy = new CourseRoutingPolicy(3, 2.0, 0.40, 2);
+        SegmentConnectivityLoader connectivityLoader = new SegmentConnectivityLoader(repository);
+        SegmentSwapEvaluator evaluator = new SegmentSwapEvaluator();
         return new SegmentSwapService(
                 repository,
-                new CourseMetricsCalculator(),
+                metricsCalculator,
                 new CourseSectionSplitter(),
-                new CourseRoutingPolicy(3, 2.0, 0.40, 2),
-                new SegmentConnectivityLoader(repository),
-                new SegmentSwapEvaluator()
+                policy,
+                connectivityLoader,
+                evaluator,
+                new SegmentSwapCandidateGenerator(
+                        repository,
+                        metricsCalculator,
+                        policy,
+                        connectivityLoader,
+                        evaluator
+                )
         );
     }
 

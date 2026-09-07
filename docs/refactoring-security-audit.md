@@ -92,6 +92,8 @@ payloads, and existing database data remain compatibility constraints.
 - Course matching no longer depends on walk-domain status types.
 - Walk services reach user persistence through `WalkUserPort`; Meet and Proximity
   authorize sessions through the immutable `WalkSessionSnapshot` port.
+- Course catalog query/metric mapping and comparison are separate use cases behind
+  the existing facade; segment-swap candidate generation has its own collaborator.
 - Static `innerHTML` uses in the frontend contain only code-owned markup; no user
   input reaches those sinks.
 
@@ -100,12 +102,6 @@ payloads, and existing database data remain compatibility constraints.
 These items were not classified as critical/high based on the current evidence and
 remain explicit follow-ups:
 
-- Split the remaining `CourseCatalogService` query/comparison metric assembly after
-  the current comparison changes are checkpointed; representative and deletion
-  use cases are already separate (Medium).
-- Extract the remaining segment-swap candidate generation loop; connectivity
-  validation and constraint/scoring evaluation now have dedicated collaborators
-  (Medium).
 - Add deployed-environment WebSocket reconnect/worker-count and parallel database
   race smoke tests; unit/architecture tests cannot fully reproduce them (Medium).
 
