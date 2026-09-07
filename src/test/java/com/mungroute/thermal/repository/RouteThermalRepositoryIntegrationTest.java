@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.jdbc.Sql;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -15,7 +16,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "RUN_DB_INTEGRATION_TESTS", matches = "true")
+@Sql(scripts = "/sql/route-network-fixture.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "/sql/route-network-cleanup.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
 class RouteThermalRepositoryIntegrationTest {
+    private static final long FIXTURE_SEGMENT_ID = 8100000000000000L;
+
     @Autowired
     RouteThermalRepository routeThermalRepository;
 
@@ -23,8 +28,8 @@ class RouteThermalRepositoryIntegrationTest {
     RouteThermalService routeThermalService;
 
     @Test
-    void readsRepresentativeD5LinkFromPostgresql() {
-        RouteThermalSnapshot snapshot = routeThermalRepository.findBySegmentId(4179L).orElseThrow();
+    void readsRepresentativeRouteSegmentFromPostgresql() {
+        RouteThermalSnapshot snapshot = routeThermalRepository.findBySegmentId(FIXTURE_SEGMENT_ID).orElseThrow();
 
         assertThat(snapshot.surfaceTemp09C()).isEqualByComparingTo("29.83");
         assertThat(snapshot.surfaceTemp12C()).isEqualByComparingTo("49.44");
@@ -36,7 +41,7 @@ class RouteThermalRepositoryIntegrationTest {
         assertThat(snapshot.updatedAt()).isNotNull();
 
         SelectedRouteTemperature selected = routeThermalService.getTemperature(
-                4179L,
+                FIXTURE_SEGMENT_ID,
                 OffsetDateTime.parse("2026-08-14T14:30:00+09:00")
         );
         assertThat(selected.referenceTime()).isEqualTo(ThermalReferenceTime.H15);

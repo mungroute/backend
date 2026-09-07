@@ -82,6 +82,33 @@ payloads, and existing database data remain compatibility constraints.
 - Regression gate: the port boundary is covered by `ArchitectureBoundaryTest`; DB
   integration tests exercise both representative update paths.
 
+### Stale WebSocket close events could schedule an extra reconnect
+
+- Reproduction: allow an old Presence, Meet, or group-course socket to deliver a
+  delayed close event after its replacement connection is active.
+- Impact: an extra socket and duplicate subscriptions could accumulate, causing
+  duplicated realtime messages and unnecessary browser/server work.
+- Severity: Medium.
+- Fix: close events mutate state only when they belong to the current socket;
+  reconnect timers are singular and are cancelled on explicit client shutdown.
+- Regression tests: frontend `presenceSocket.test.ts`, `meetSocket.test.ts`, and
+  `groupCourseSocket.test.ts`.
+
+### Route integration tests depended on an imported developer dataset
+
+- Reproduction: migrate a clean PostgreSQL database, set
+  `RUN_DB_INTEGRATION_TESTS=true`, and run the route, catalog, group, and thermal
+  integration tests.
+- Impact: CI could fail before exercising those paths because no route rows were
+  created by Flyway, while a populated developer database hid the dependency.
+- Severity: Medium.
+- Fix: affected tests now install and remove a deterministic test-only PostGIS and
+  pgRouting network with hot base edges and cooler bounded-detour alternatives.
+- Regression tests: `CourseRoutingRepositoryIntegrationTest`,
+  `CourseCatalogFlowIntegrationTest`, `CourseDrawFlowIntegrationTest`,
+  `GroupFlowIntegrationTest`, and `RouteThermalRepositoryIntegrationTest` pass
+  against a schema-only database without using the data-pipeline.
+
 ## Verified controls
 
 - Refresh-cookie requests from an unapproved Origin are rejected by the CORS
