@@ -5,9 +5,10 @@ import tools.jackson.databind.ObjectMapper;
 import com.mungroute.course.matching.MapMatchingFailure;
 import com.mungroute.course.matching.MapMatchingResult;
 import com.mungroute.course.matching.MapMatchingStatus;
-import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.walk.domain.WalkMode;
+import com.mungroute.walk.domain.WalkLifecycleEvent;
+import com.mungroute.walk.domain.WalkLifecycleState;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.dto.request.AddWalkPointRequest;
 import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
@@ -21,6 +22,7 @@ import com.mungroute.walk.repository.EndWalkSummary;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
+import com.mungroute.walk.port.WalkMapMatchingPort;
 import com.mungroute.walk.port.WalkPresencePort;
 import com.mungroute.walk.port.WalkUserPort;
 import jakarta.transaction.Transactional;
@@ -35,35 +37,38 @@ public class WalkSessionService {
     private final WalkSessionRepository walkSessionRepository;
     private final WalkTrackPointRepository walkTrackPointRepository;
     private final WalkFinalizationService walkFinalizationService;
-    private final SimpleMapMatchingService mapMatchingService;
+    private final WalkMapMatchingPort mapMatchingPort;
     private final WalkMatchOutcomeService matchOutcomeService;
     private final ObjectMapper objectMapper;
     private final WalkPresencePort presencePort;
     private final WalkMeetPort meetPort;
     private final WalkSessionCleanup sessionCleanup;
+    private final WalkSessionStateMachine stateMachine;
 
     public WalkSessionService(
             WalkUserPort userPort,
             WalkSessionRepository walkSessionRepository,
             WalkTrackPointRepository walkTrackPointRepository,
             WalkFinalizationService walkFinalizationService,
-            SimpleMapMatchingService mapMatchingService,
+            WalkMapMatchingPort mapMatchingPort,
             WalkMatchOutcomeService matchOutcomeService,
             ObjectMapper objectMapper,
             WalkPresencePort presencePort,
             WalkMeetPort meetPort,
-            WalkSessionCleanup sessionCleanup
+            WalkSessionCleanup sessionCleanup,
+            WalkSessionStateMachine stateMachine
     ) {
         this.userPort = userPort;
         this.walkSessionRepository = walkSessionRepository;
         this.walkTrackPointRepository = walkTrackPointRepository;
         this.walkFinalizationService = walkFinalizationService;
-        this.mapMatchingService = mapMatchingService;
+        this.mapMatchingPort = mapMatchingPort;
         this.matchOutcomeService = matchOutcomeService;
         this.objectMapper = objectMapper;
         this.presencePort = presencePort;
         this.meetPort = meetPort;
         this.sessionCleanup = sessionCleanup;
+        this.stateMachine = stateMachine;
     }
 
     // 사용자에게 새로운 활성 산책 세션 생성
@@ -84,6 +89,7 @@ public class WalkSessionService {
         var activeSession = walkSessionRepository.findActiveByUserIdForUpdate(userId);
         if (activeSession.isPresent()) {
             WalkSession session = activeSession.get();
+            stateMachine.transition(session, WalkLifecycleEvent.RESTORE);
             // A client may have lost its local session snapshot after an auth or
             // page reload. In that case the server's active session is
             // authoritative: recover it instead of rejecting a newly selected,
@@ -101,6 +107,7 @@ public class WalkSessionService {
             return StartWalkResponse.from(session);
         }
 
+        stateMachine.transition(WalkLifecycleState.NOT_STARTED, WalkLifecycleEvent.START);
         WalkSession walkSession = WalkSession.start(
                 user,
                 requestedMode,
@@ -136,15 +143,7 @@ public class WalkSessionService {
 
         validateOwner(walkSession, userId);
 
-        if (!walkSession.isActive()) {
-            throw new BusinessException(
-                    WalkErrorCode.WALK_SESSION_ALREADY_ENDED
-            );
-        }
-
-        if (walkSession.isPaused()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_PAUSED);
-        }
+        stateMachine.transition(walkSession, WalkLifecycleEvent.ADD_POINT);
 
         validateRecordedAt(
                 walkSession,
@@ -191,9 +190,7 @@ public class WalkSessionService {
         if (session.getPausedAt() != null) {
             elapsedSeconds -= Math.max(0, Duration.between(session.getPausedAt(), measuredUntil).toSeconds());
         }
-        String status = session.getEndedAt() != null
-                ? "ENDED"
-                : session.isPaused() ? "PAUSED" : "ACTIVE";
+        String status = stateMachine.stateOf(session).apiValue();
         return new ActiveWalkStateResponse(
                 sessionId,
                 status,
@@ -215,7 +212,7 @@ public class WalkSessionService {
         if (finalization.matchingRequired()) {
             MapMatchingResult matchResult;
             try {
-                matchResult = mapMatchingService.matchSession(sessionId);
+                matchResult = mapMatchingPort.matchSession(sessionId);
             } catch (RuntimeException exception) {
                 matchResult = new MapMatchingResult(
                         MapMatchingStatus.FAILED,
@@ -252,9 +249,7 @@ public class WalkSessionService {
         WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.PAUSE);
         walkSessionRepository.pauseWalkSession(sessionId, changedAt);
         presencePort.pause(sessionId, changedAt);
         meetPort.closeForSession(userId, sessionId);
@@ -267,9 +262,7 @@ public class WalkSessionService {
         WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.RESUME);
         walkSessionRepository.resumeWalkSession(sessionId, changedAt);
         return new com.mungroute.walk.dto.response.WalkStateResponse(sessionId, "ACTIVE", changedAt);
     }
@@ -285,9 +278,7 @@ public class WalkSessionService {
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
 
         validateOwner(session, userId);
-        if (!session.isActive()) {
-            throw new BusinessException(WalkErrorCode.WALK_SESSION_ALREADY_ENDED);
-        }
+        stateMachine.transition(session, WalkLifecycleEvent.CHANGE_MODE);
 
         WalkMode nextMode = WalkMode.from(request.mode());
         validateModeTransition(session, nextMode);

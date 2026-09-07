@@ -14,6 +14,7 @@ import com.mungroute.place.controller.PlaceController;
 import com.mungroute.place.dto.PlaceSearchResponse;
 import com.mungroute.place.service.PlaceService;
 import com.mungroute.user.dto.response.UserResponse;
+import com.mungroute.user.service.UserProfileService;
 import com.mungroute.walk.controller.WalkSessionController;
 import com.mungroute.walk.service.WalkRecordService;
 import com.mungroute.walk.service.WalkSessionService;
@@ -79,6 +80,9 @@ class SecurityAccessTest {
 
     @MockitoBean
     PlaceService placeService;
+
+    @MockitoBean
+    UserProfileService userProfileService;
 
     @Test
     void anonymousUserCannotAccessWalkApi() throws Exception {
@@ -150,7 +154,8 @@ class SecurityAccessTest {
         );
         when(userDetailsService.loadUserById(1L)).thenReturn(principal);
         when(accessTokenSessionValidator.isActive("active-session")).thenReturn(true);
-        when(authService.getUser(1L)).thenReturn(new UserResponse(1L, principal.email(), principal.nickname(), "01012345678"));
+        when(userProfileService.me(1L)).thenReturn(
+                new UserResponse(1L, principal.email(), principal.nickname(), "01012345678"));
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer("mungroute-test").subject("1").issuedAt(now).expiresAt(now.plusSeconds(600))

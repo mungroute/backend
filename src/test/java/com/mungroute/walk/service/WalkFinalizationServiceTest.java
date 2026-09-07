@@ -30,7 +30,8 @@ class WalkFinalizationServiceTest {
         when(session.getMatchStatus()).thenReturn(WalkMatchStatus.NOT_PERFORMED);
         when(session.isActive()).thenReturn(true);
 
-        WalkFinalizationService service = new WalkFinalizationService(sessions, outbox);
+        WalkFinalizationService service = new WalkFinalizationService(
+                sessions, outbox, new WalkSessionStateMachine());
 
         var result = service.finalizeWalk(1L, 27L, endedAt);
 

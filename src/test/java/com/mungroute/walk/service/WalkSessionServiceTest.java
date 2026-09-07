@@ -1,6 +1,5 @@
 package com.mungroute.walk.service;
 
-import com.mungroute.course.matching.SimpleMapMatchingService;
 import com.mungroute.user.domain.AppUser;
 import com.mungroute.walk.domain.WalkMode;
 import com.mungroute.walk.domain.WalkSession;
@@ -10,12 +9,14 @@ import com.mungroute.walk.dto.request.ChangeWalkModeRequest;
 import com.mungroute.walk.repository.WalkSessionRepository;
 import com.mungroute.walk.repository.WalkTrackPointRepository;
 import com.mungroute.walk.port.WalkMeetPort;
+import com.mungroute.walk.port.WalkMapMatchingPort;
 import com.mungroute.walk.port.WalkPresencePort;
 import com.mungroute.walk.port.WalkUserPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 
@@ -46,7 +47,7 @@ class WalkSessionServiceTest {
     WalkFinalizationService walkFinalizationService;
 
     @Mock
-    SimpleMapMatchingService mapMatchingService;
+    WalkMapMatchingPort mapMatchingPort;
 
     @Mock
     WalkMatchOutcomeService matchOutcomeService;
@@ -62,6 +63,9 @@ class WalkSessionServiceTest {
 
     @Mock
     WalkSessionCleanup sessionCleanup;
+
+    @Spy
+    WalkSessionStateMachine stateMachine = new WalkSessionStateMachine();
 
     @InjectMocks
     WalkSessionService walkSessionService;
@@ -102,7 +106,6 @@ class WalkSessionServiceTest {
         when(user.getUserId()).thenReturn(userId);
         when(session.getSessionId()).thenReturn(sessionId);
         when(session.getStartedAt()).thenReturn(startedAt);
-        when(session.isActive()).thenReturn(true);
         when(session.isPaused()).thenReturn(false);
         when(session.getMode()).thenReturn(WalkMode.OFF);
 
@@ -137,7 +140,6 @@ class WalkSessionServiceTest {
         when(user.getUserId()).thenReturn(userId);
         when(session.getSessionId()).thenReturn(sessionId);
         when(session.getStartedAt()).thenReturn(recordedAt.minusMinutes(1));
-        when(session.isActive()).thenReturn(true);
         when(session.isPaused()).thenReturn(false);
         when(session.getMode()).thenReturn(WalkMode.DISTANCE);
 
@@ -237,7 +239,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.MEET);
 
         var response = walkSessionService.changeMode(
@@ -267,7 +268,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
 
         var response = walkSessionService.changeMode(
@@ -291,7 +291,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
 
         var response = walkSessionService.pauseWalk(userId, sessionId);
 
@@ -318,7 +317,6 @@ class WalkSessionServiceTest {
         when(walkSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
         when(session.getUser()).thenReturn(user);
         when(user.getUserId()).thenReturn(userId);
-        when(session.isActive()).thenReturn(true);
         when(session.getLockedMode()).thenReturn(WalkMode.DISTANCE);
 
         assertThatThrownBy(() -> walkSessionService.changeMode(

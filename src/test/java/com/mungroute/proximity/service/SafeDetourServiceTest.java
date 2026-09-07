@@ -1,12 +1,11 @@
 package com.mungroute.proximity.service;
 
-import com.mungroute.course.draw.repository.CourseDrawRepository;
-import com.mungroute.course.draw.repository.SnappedWalkablePoint;
 import com.mungroute.proximity.detour.SafeDetourPath;
 import com.mungroute.proximity.detour.SafeDetourRouteRepository;
 import com.mungroute.proximity.dto.request.SafeDetourPointRequest;
 import com.mungroute.proximity.dto.request.SafeDetourRequest;
 import com.mungroute.proximity.dto.response.SafeDetourPointResponse;
+import com.mungroute.proximity.port.SafeDetourSnapPort;
 import com.mungroute.proximity.store.NearbyPresenceLocation;
 import com.mungroute.proximity.store.PresenceLocation;
 import com.mungroute.proximity.store.PresenceLocationStore;
@@ -37,7 +36,7 @@ import static org.mockito.Mockito.when;
 class SafeDetourServiceTest {
     @Mock WalkSessionAccessPort walkSessionPort;
     @Mock PresenceLocationStore presenceLocationStore;
-    @Mock CourseDrawRepository courseDrawRepository;
+    @Mock SafeDetourSnapPort snapPort;
     @Mock SafeDetourRouteRepository routeRepository;
 
     SafeDetourService service;
@@ -48,7 +47,7 @@ class SafeDetourServiceTest {
     @BeforeEach
     void setUp() {
         service = new SafeDetourService(
-                walkSessionPort, presenceLocationStore, courseDrawRepository, routeRepository);
+                walkSessionPort, presenceLocationStore, snapPort, routeRepository);
         when(walkSessionPort.find(sessionId)).thenReturn(Optional.of(
                 new WalkSessionSnapshot(sessionId, userId, true, false, "distance")
         ));
@@ -127,9 +126,11 @@ class SafeDetourServiceTest {
         when(presenceLocationStore.findLocation(20)).thenReturn(Optional.of(candidate));
         when(presenceLocationStore.findNearby(eq(origin), eq(550), eq(6))).thenReturn(List.of(
                 new NearbyPresenceLocation(20, 2, "distance", 126.9782, 37.5669, 7)));
-        when(courseDrawRepository.snapToNearestWalkable(anyDouble(), anyDouble(), anyDouble()))
-                .thenReturn(Optional.of(new SnappedWalkablePoint(100, 1, 37.5665, 126.9780, 2)))
-                .thenReturn(Optional.of(new SnappedWalkablePoint(200, 2, 37.5681, 126.9780, 3)));
+        when(snapPort.snap(anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(Optional.of(new SafeDetourSnapPort.SnappedPoint(
+                        100, 1, 37.5665, 126.9780, 2)))
+                .thenReturn(Optional.of(new SafeDetourSnapPort.SnappedPoint(
+                        200, 2, 37.5681, 126.9780, 3)));
     }
 
     private SafeDetourRequest request(String trend) {

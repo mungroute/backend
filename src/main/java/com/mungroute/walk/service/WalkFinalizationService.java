@@ -2,6 +2,7 @@ package com.mungroute.walk.service;
 
 import com.mungroute.global.exception.BusinessException;
 import com.mungroute.walk.domain.WalkMatchStatus;
+import com.mungroute.walk.domain.WalkLifecycleEvent;
 import com.mungroute.walk.domain.WalkSession;
 import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.repository.WalkCleanupOutboxRepository;
@@ -15,13 +16,16 @@ import java.time.OffsetDateTime;
 public class WalkFinalizationService {
     private final WalkSessionRepository walkSessionRepository;
     private final WalkCleanupOutboxRepository cleanupOutboxRepository;
+    private final WalkSessionStateMachine stateMachine;
 
     public WalkFinalizationService(
             WalkSessionRepository walkSessionRepository,
-            WalkCleanupOutboxRepository cleanupOutboxRepository
+            WalkCleanupOutboxRepository cleanupOutboxRepository,
+            WalkSessionStateMachine stateMachine
     ) {
         this.walkSessionRepository = walkSessionRepository;
         this.cleanupOutboxRepository = cleanupOutboxRepository;
+        this.stateMachine = stateMachine;
     }
 
     @Transactional
@@ -29,6 +33,7 @@ public class WalkFinalizationService {
         WalkSession session = walkSessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new BusinessException(WalkErrorCode.WALK_SESSION_NOT_FOUND));
         validateOwner(session, userId);
+        stateMachine.transition(session, WalkLifecycleEvent.END);
         WalkMatchStatus existingStatus = session.getMatchStatus();
         boolean finalizedNow = false;
         if (session.isActive()) {

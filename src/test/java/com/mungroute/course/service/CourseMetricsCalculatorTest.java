@@ -4,9 +4,8 @@ import com.mungroute.course.domain.CourseMetrics;
 import com.mungroute.course.domain.CourseSegmentData;
 import com.mungroute.course.draw.time.CourseCalculationContext;
 import com.mungroute.course.draw.time.SolarState;
+import com.mungroute.course.port.CourseWeatherPort;
 import com.mungroute.thermal.domain.ThermalReferenceTime;
-import com.mungroute.weather.domain.WeatherSnapshot;
-import com.mungroute.weather.service.LiveWeatherService;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -55,12 +54,12 @@ class CourseMetricsCalculatorTest {
     @Test
     void recalculatesSurfaceTemperatureWithCurrentAsosWeather() {
         Instant requestedAt = Instant.parse("2026-08-20T06:20:00Z");
-        LiveWeatherService weatherService = mock(LiveWeatherService.class);
-        when(weatherService.resolve(requestedAt)).thenReturn(Optional.of(new WeatherSnapshot(
-                Instant.parse("2026-08-20T06:00:00Z"), requestedAt, 108,
-                31.3, 2.8, 855.5555555555555, 0, 0, 48, "NOWCAST"
+        CourseWeatherPort weatherPort = mock(CourseWeatherPort.class);
+        when(weatherPort.resolve(requestedAt)).thenReturn(Optional.of(new CourseWeatherPort.Snapshot(
+                Instant.parse("2026-08-20T06:00:00Z"),
+                31.3, 2.8, 855.5555555555555, "NOWCAST"
         )));
-        CourseMetricsCalculator liveCalculator = new CourseMetricsCalculator(weatherService);
+        CourseMetricsCalculator liveCalculator = new CourseMetricsCalculator(weatherPort);
         CourseSegmentData segment = new CourseSegmentData(
                 1, 1, 2, new BigDecimal("100"), BigDecimal.ZERO, new BigDecimal("40"),
                 "LOW", LocalDate.of(2026, 8, 11), "asphalt",

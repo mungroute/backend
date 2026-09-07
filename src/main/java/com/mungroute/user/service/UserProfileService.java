@@ -27,6 +27,12 @@ public class UserProfileService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    public UserResponse me(long userId) {
+        return userRepository.findById(userId)
+                .map(UserResponse::from)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+    }
+
     @Transactional
     public UserResponse update(long userId, UpdateUserProfileRequest request) {
         AppUser user = userRepository.findById(userId)

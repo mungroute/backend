@@ -1,5 +1,6 @@
 package com.mungroute.thermal.service;
 
+import com.mungroute.thermal.domain.SurfaceTemperatureModel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

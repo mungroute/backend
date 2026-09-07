@@ -19,10 +19,10 @@ import com.mungroute.course.draw.repository.TraversedWalkableSegment;
 import com.mungroute.course.draw.time.CourseCalculationContext;
 import com.mungroute.course.draw.time.SolarPositionService;
 import com.mungroute.course.repository.CourseRoutingRepository;
+import com.mungroute.course.catalog.port.CourseOwnerLockPort;
 import com.mungroute.course.service.CourseMetricsCalculator;
 import com.mungroute.course.service.CourseProcessingException;
 import com.mungroute.global.exception.BusinessException;
-import com.mungroute.user.repository.AppUserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -39,7 +39,7 @@ public class CourseDrawService {
     private static final double DIRECT_POINT_TOLERANCE_M = 3.0;
     private static final double MAX_COURSE_LENGTH_M = 50_000.0;
 
-    private final AppUserRepository appUserRepository;
+    private final CourseOwnerLockPort ownerLockPort;
     private final CourseDrawRepository courseDrawRepository;
     private final CourseRoutingRepository courseRoutingRepository;
     private final CourseMetricsCalculator metricsCalculator;
@@ -47,14 +47,14 @@ public class CourseDrawService {
     private final ObjectMapper objectMapper;
 
     public CourseDrawService(
-            AppUserRepository appUserRepository,
+            CourseOwnerLockPort ownerLockPort,
             CourseDrawRepository courseDrawRepository,
             CourseRoutingRepository courseRoutingRepository,
             CourseMetricsCalculator metricsCalculator,
             SolarPositionService solarPositionService,
             ObjectMapper objectMapper
     ) {
-        this.appUserRepository = appUserRepository;
+        this.ownerLockPort = ownerLockPort;
         this.courseDrawRepository = courseDrawRepository;
         this.courseRoutingRepository = courseRoutingRepository;
         this.metricsCalculator = metricsCalculator;
@@ -96,8 +96,9 @@ public class CourseDrawService {
 
     @Transactional
     public CustomCourseResponse save(long userId, SaveCustomCourseRequest request) {
-        appUserRepository.findByIdForUpdate(userId)
-                .orElseThrow(() -> new BusinessException(CourseDrawErrorCode.USER_NOT_FOUND));
+        if (!ownerLockPort.lock(userId)) {
+            throw new BusinessException(CourseDrawErrorCode.USER_NOT_FOUND);
+        }
         RouteAssembly route = buildRoute(request.waypoints());
         CourseCalculationContext context = calculationContext(request.waypoints(), request.requestedAt());
         CourseMetrics metrics = calculateMetrics(route.traversedSegments(), context);

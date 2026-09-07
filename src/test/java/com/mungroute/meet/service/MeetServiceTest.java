@@ -4,7 +4,7 @@ import com.mungroute.global.exception.BusinessException;
 import com.mungroute.meet.repository.MeetProfileRecord;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
-import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.meet.port.MeetPresencePort;
 import com.mungroute.walk.port.WalkSessionAccessPort;
 import com.mungroute.walk.port.WalkSessionSnapshot;
 import org.junit.jupiter.api.Test;
@@ -28,12 +28,12 @@ import static org.mockito.Mockito.when;
 class MeetServiceTest {
     @Mock MeetRepository meetRepository;
     @Mock WalkSessionAccessPort walkSessionPort;
-    @Mock PresenceLocationStore locationStore;
+    @Mock MeetPresencePort presencePort;
     @Mock SimpMessagingTemplate messagingTemplate;
 
     @Test
     void pendingRequestExposesOnlySafePreview() {
-        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, presencePort, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         when(meetRepository.findForSession(10L)).thenReturn(List.of(pending));
         when(walkSessionPort.findForUpdate(10L)).thenReturn(Optional.of(
@@ -51,7 +51,7 @@ class MeetServiceTest {
 
     @Test
     void onlyRecipientCanAcceptAndProfileAppearsAfterAcceptance() {
-        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, presencePort, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         MeetRequestRecord accepted = request("ACCEPTED");
         when(meetRepository.findRequest(pending.requestId())).thenReturn(Optional.of(pending), Optional.of(accepted));
@@ -72,7 +72,7 @@ class MeetServiceTest {
 
     @Test
     void requesterCannotAcceptOwnRequest() {
-        MeetService service = new MeetService(meetRepository, walkSessionPort, locationStore, messagingTemplate);
+        MeetService service = new MeetService(meetRepository, walkSessionPort, presencePort, messagingTemplate);
         MeetRequestRecord pending = request("PENDING");
         when(meetRepository.findRequest(pending.requestId())).thenReturn(Optional.of(pending));
 

@@ -4,9 +4,8 @@ import com.mungroute.course.domain.AlternativeReason;
 import com.mungroute.course.domain.CourseMetrics;
 import com.mungroute.course.domain.CourseSegmentData;
 import com.mungroute.course.draw.time.CourseCalculationContext;
-import com.mungroute.thermal.service.SurfaceTemperatureModel;
-import com.mungroute.weather.domain.WeatherSnapshot;
-import com.mungroute.weather.service.LiveWeatherService;
+import com.mungroute.course.port.CourseWeatherPort;
+import com.mungroute.thermal.domain.SurfaceTemperatureModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -29,17 +28,17 @@ public class CourseMetricsCalculator {
             "HIGH", 2
     );
 
-    private final LiveWeatherService liveWeatherService;
+    private final CourseWeatherPort weatherPort;
     private final SurfaceTemperatureModel surfaceTemperatureModel;
 
     public CourseMetricsCalculator() {
-        this.liveWeatherService = null;
+        this.weatherPort = null;
         this.surfaceTemperatureModel = new SurfaceTemperatureModel();
     }
 
     @Autowired
-    public CourseMetricsCalculator(LiveWeatherService liveWeatherService) {
-        this.liveWeatherService = liveWeatherService;
+    public CourseMetricsCalculator(CourseWeatherPort weatherPort) {
+        this.weatherPort = weatherPort;
         this.surfaceTemperatureModel = new SurfaceTemperatureModel();
     }
 
@@ -48,13 +47,13 @@ public class CourseMetricsCalculator {
     }
 
     public CourseMetrics calculate(List<CourseSegmentData> segments, CourseCalculationContext context) {
-        if (context == null || liveWeatherService == null) return calculate(segments);
-        var weather = liveWeatherService.resolve(context.calculatedAt());
+        if (context == null || weatherPort == null) return calculate(segments);
+        var weather = weatherPort.resolve(context.calculatedAt());
         if (weather.isEmpty() || segments == null || segments.isEmpty()
                 || segments.stream().anyMatch(segment -> segment == null || !segment.hasThermalModelInputs())) {
             return calculate(segments);
         }
-        WeatherSnapshot snapshot = weather.get();
+        CourseWeatherPort.Snapshot snapshot = weather.get();
         LocalDate weatherDate = snapshot.observedAt().atZone(SERVICE_ZONE).toLocalDate();
         List<CourseSegmentData> resolved = segments.stream()
                 .map(segment -> applyWeather(segment, snapshot, weatherDate))
@@ -66,14 +65,14 @@ public class CourseMetricsCalculator {
             List<CourseSegmentData> segments,
             CourseCalculationContext context
     ) {
-        if (context == null || liveWeatherService == null || segments == null || segments.isEmpty()) {
+        if (context == null || weatherPort == null || segments == null || segments.isEmpty()) {
             return segments;
         }
-        var weather = liveWeatherService.resolve(context.calculatedAt());
+        var weather = weatherPort.resolve(context.calculatedAt());
         if (weather.isEmpty() || segments.stream().anyMatch(segment -> segment == null || !segment.hasThermalModelInputs())) {
             return segments;
         }
-        WeatherSnapshot snapshot = weather.get();
+        CourseWeatherPort.Snapshot snapshot = weather.get();
         LocalDate weatherDate = snapshot.observedAt().atZone(SERVICE_ZONE).toLocalDate();
         return segments.stream()
                 .map(segment -> applyWeather(segment, snapshot, weatherDate))
@@ -134,7 +133,7 @@ public class CourseMetricsCalculator {
 
     private CourseSegmentData applyWeather(
             CourseSegmentData segment,
-            WeatherSnapshot weather,
+            CourseWeatherPort.Snapshot weather,
             LocalDate weatherDate
     ) {
         double shadeRatio = segment.shadeRatio().doubleValue();

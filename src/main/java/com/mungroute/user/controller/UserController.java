@@ -1,8 +1,8 @@
 package com.mungroute.user.controller;
 
-import com.mungroute.auth.service.AuthService;
 import com.mungroute.auth.security.MungrouteUserPrincipal;
 import com.mungroute.user.dto.response.UserResponse;
+import com.mungroute.user.service.UserProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,15 +16,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
-    private final AuthService authService;
+    private final UserProfileService userProfileService;
 
-    public UserController(AuthService authService) {
-        this.authService = authService;
+    public UserController(UserProfileService userProfileService) {
+        this.userProfileService = userProfileService;
     }
 
     @Operation(summary = "내 정보 조회")
     @GetMapping("/me")
     public UserResponse me(@AuthenticationPrincipal MungrouteUserPrincipal principal) {
-        return authService.getUser(principal.userId());
+        return userProfileService.me(principal.userId());
     }
 }

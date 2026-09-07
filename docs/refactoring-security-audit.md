@@ -119,6 +119,12 @@ payloads, and existing database data remain compatibility constraints.
 - Course matching no longer depends on walk-domain status types.
 - Walk services reach user persistence through `WalkUserPort`; Meet and Proximity
   authorize sessions through the immutable `WalkSessionSnapshot` port.
+- Authentication, group sharing, course weather/owner access, Meet presence,
+  safe-detour snapping, and walk map matching now consume feature-owned ports;
+  ArchUnit rejects any use case that reaches another feature's service or
+  repository implementation directly.
+- Walk lifecycle transitions are explicit for start, restore, active writes,
+  pause, resume, mode changes, and idempotent end behavior.
 - The cleanup outbox lease is claimed atomically; a real PostgreSQL race test
   verifies that two workers cannot claim the same session concurrently.
 - Course catalog query/metric mapping and comparison are separate use cases behind

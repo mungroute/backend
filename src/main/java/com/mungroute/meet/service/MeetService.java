@@ -9,7 +9,7 @@ import com.mungroute.meet.dto.response.MeetRequestResponse;
 import com.mungroute.meet.exception.MeetErrorCode;
 import com.mungroute.meet.repository.MeetRepository;
 import com.mungroute.meet.repository.MeetRequestRecord;
-import com.mungroute.proximity.store.PresenceLocationStore;
+import com.mungroute.meet.port.MeetPresencePort;
 import com.mungroute.walk.exception.WalkErrorCode;
 import com.mungroute.walk.port.WalkSessionAccessPort;
 import com.mungroute.walk.port.WalkSessionSnapshot;
@@ -29,14 +29,14 @@ public class MeetService {
     private static final Duration REQUEST_TTL = Duration.ofMinutes(2);
     private final MeetRepository meetRepository;
     private final WalkSessionAccessPort walkSessionPort;
-    private final PresenceLocationStore locationStore;
+    private final MeetPresencePort presencePort;
     private final SimpMessagingTemplate messagingTemplate;
 
     public MeetService(MeetRepository meetRepository, WalkSessionAccessPort walkSessionPort,
-                       PresenceLocationStore locationStore, SimpMessagingTemplate messagingTemplate) {
+                       MeetPresencePort presencePort, SimpMessagingTemplate messagingTemplate) {
         this.meetRepository = meetRepository;
         this.walkSessionPort = walkSessionPort;
-        this.locationStore = locationStore;
+        this.presencePort = presencePort;
         this.messagingTemplate = messagingTemplate;
     }
 
@@ -52,9 +52,9 @@ public class MeetService {
     @Transactional
     public MeetRequestResponse create(long userId, long sessionId, String candidateRef) {
         WalkSessionSnapshot own = ownedMeetSession(userId, sessionId);
-        var candidate = locationStore.resolveMeetCandidateRef(sessionId, candidateRef)
+        var candidate = presencePort.resolveCandidateRef(sessionId, candidateRef)
                 .orElseThrow(() -> new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED));
-        var targetState = locationStore.findSession(candidate.sessionId())
+        var targetState = presencePort.findSession(candidate.sessionId())
                 .orElseThrow(() -> new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED));
         if (!"meet".equals(targetState.mode()) || candidate.userId() != targetState.userId()) {
             throw new BusinessException(MeetErrorCode.CANDIDATE_EXPIRED);

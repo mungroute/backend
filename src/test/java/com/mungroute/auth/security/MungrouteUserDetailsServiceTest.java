@@ -1,7 +1,7 @@
 package com.mungroute.auth.security;
 
+import com.mungroute.auth.port.AuthUserPort;
 import com.mungroute.user.domain.AppUser;
-import com.mungroute.user.repository.AppUserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
 class MungrouteUserDetailsServiceTest {
 
     @Mock
-    AppUserRepository userRepository;
+    AuthUserPort userPort;
 
     @InjectMocks
     MungrouteUserDetailsService userDetailsService;
@@ -27,7 +27,7 @@ class MungrouteUserDetailsServiceTest {
     @Test
     void loadsOnlyActiveUserByEmail() {
         AppUser user = AppUser.register("active@example.com", "active", "hash", "01012345678");
-        when(userRepository.findByEmailAndDeletedAtIsNull("active@example.com")).thenReturn(Optional.of(user));
+        when(userPort.findActiveByEmail("active@example.com")).thenReturn(Optional.of(user));
 
         assertThat(userDetailsService.loadUserByUsername(" ACTIVE@example.com ").getUsername())
                 .isEqualTo("active@example.com");
@@ -35,7 +35,7 @@ class MungrouteUserDetailsServiceTest {
 
     @Test
     void rejectsDeletedUserById() {
-        when(userRepository.findByUserIdAndDeletedAtIsNull(7L)).thenReturn(Optional.empty());
+        when(userPort.findActiveById(7L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userDetailsService.loadUserById(7L))
                 .isInstanceOf(UsernameNotFoundException.class);
